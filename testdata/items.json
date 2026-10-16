@@ -1,0 +1,7 @@
+{"items": [
+ {"id": "qfaults", "properties": {"title": "Faults", "description": "Fixture faults"},
+  "assets": {"data": {"href": "testdata/qfaults.parquet"}}},
+ {"id": "geolunits", "properties": {"title": "Units"}, "assets": {"data": {"href": "testdata/geolunits.parquet"}}},
+ {"id": "wells", "properties": {"title": "Wells", "ugs:renders": {"by-purpose": {"title": "By purpose"}, "by-boxtype": {}}},
+  "assets": {"data": {"href": "testdata/wells.parquet"}}}
+]}
