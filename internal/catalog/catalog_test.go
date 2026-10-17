@@ -60,11 +60,11 @@ func TestRendererVersionFollowsTheFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := c.RendererVersion(context.Background(), it, "b")
+		d, err := c.Drawing(context.Background(), it, "b")
 		if err != nil {
 			t.Fatal(err)
 		}
-		return v
+		return d.Version
 	}
 	if version(`{"type":"simple"}`) == version(`{"type":"uniqueValue"}`) {
 		t.Fatal("a republished renderer kept its version")

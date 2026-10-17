@@ -77,7 +77,7 @@ func TestProjection(t *testing.T) {
 func TestToEsri(t *testing.T) {
 	ccw := orb.Ring{{0, 0}, {1, 0}, {1, 1}, {0, 1}, {0, 0}}
 	e, _ := ToEsri(orb.Polygon{ccw})
-	if !clockwise(e.Parts[0]) {
+	if !Clockwise(e.Parts[0]) {
 		t.Error("outer ring should be clockwise")
 	}
 	open := orb.Ring{{0, 0}, {0, 1}, {1, 1}}
@@ -86,7 +86,7 @@ func TestToEsri(t *testing.T) {
 		t.Errorf("ring should be closed: %v", e.Parts)
 	}
 	e, _ = ToEsri(orb.MultiPolygon{{ccw, orb.Ring{{0.2, 0.2}, {0.2, 0.4}, {0.4, 0.4}, {0.2, 0.2}}}})
-	if len(e.Parts) != 2 || clockwise(e.Parts[0]) || !clockwise(e.Parts[1]) {
+	if len(e.Parts) != 2 || Clockwise(e.Parts[0]) || !Clockwise(e.Parts[1]) {
 		t.Errorf("multipolygon rings come hole first (as terraformer writes them): %v", e.Parts)
 	}
 	if got := string(e.AppendJSON(nil)); got[:9] != `{"rings":` {

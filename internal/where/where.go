@@ -48,21 +48,6 @@ func Parse(where string, resolve Resolver) (Expr, error) {
 	return e, nil
 }
 
-// Fields lists the field names a where clause mentions (lower-cased).
-func Fields(where string) []string {
-	toks, err := lex(where)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, t := range toks {
-		if t.kind == tIdent {
-			out = append(out, strings.ToLower(t.text))
-		}
-	}
-	return out
-}
-
 // --- lexer
 
 type tokKind int
@@ -89,6 +74,14 @@ var keywords = map[string]bool{"AND": true, "OR": true, "NOT": true, "IN": true,
 	"IS": true, "NULL": true, "BETWEEN": true, "ESCAPE": true, "TRUE": true, "FALSE": true,
 	"DATE": true, "TIMESTAMP": true}
 
+var punct = map[byte]tokKind{'(': tLParen, ')': tRParen, ',': tComma}
+
+var (
+	number = regexp.MustCompile(`^[0-9.]+([eE][+-]?[0-9]+)?`)
+	name   = regexp.MustCompile(`^[_A-Za-z][_.A-Za-z0-9]*`)
+	quoted = regexp.MustCompile(`^'(?:[^']|'')*'`)
+)
+
 func lex(s string) ([]token, error) {
 	var out []token
 	for i := 0; i < len(s); {
@@ -96,40 +89,19 @@ func lex(s string) ([]token, error) {
 		switch {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
-		case c == '(':
-			out = append(out, token{kind: tLParen})
-			i++
-		case c == ')':
-			out = append(out, token{kind: tRParen})
-			i++
-		case c == ',':
-			out = append(out, token{kind: tComma})
+		case c == '(' || c == ')' || c == ',':
+			out = append(out, token{kind: punct[c]})
 			i++
 		case c == '\'':
-			var b strings.Builder
-			i++
-			for {
-				if i >= len(s) {
-					return nil, fmt.Errorf("unterminated string")
-				}
-				if s[i] == '\'' {
-					if i+1 < len(s) && s[i+1] == '\'' {
-						b.WriteByte('\'')
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				b.WriteByte(s[i])
-				i++
+			m := quoted.FindString(s[i:])
+			if m == "" {
+				return nil, fmt.Errorf("unterminated string")
 			}
-			out = append(out, token{kind: tString, text: b.String()})
+			out = append(out, token{kind: tString, text: strings.ReplaceAll(m[1:len(m)-1], "''", "'")})
+			i += len(m)
 		case c == '"' || c == '`' || c == '[':
-			end := byte('"')
-			if c == '`' {
-				end = '`'
-			} else if c == '[' {
+			end := c
+			if c == '[' {
 				end = ']'
 			}
 			j := strings.IndexByte(s[i+1:], end)
@@ -139,40 +111,21 @@ func lex(s string) ([]token, error) {
 			out = append(out, token{kind: tIdent, text: s[i+1 : i+1+j]})
 			i += j + 2
 		case c >= '0' && c <= '9' || c == '.' && i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '9':
-			j := i
-			for j < len(s) && (s[j] >= '0' && s[j] <= '9' || s[j] == '.') {
-				j++
-			}
-			if j < len(s) && (s[j] == 'e' || s[j] == 'E') {
-				k := j + 1
-				if k < len(s) && (s[k] == '+' || s[k] == '-') {
-					k++
-				}
-				if k < len(s) && s[k] >= '0' && s[k] <= '9' {
-					for k < len(s) && s[k] >= '0' && s[k] <= '9' {
-						k++
-					}
-					j = k
-				}
-			}
-			f, err := strconv.ParseFloat(s[i:j], 64)
+			n := number.FindString(s[i:])
+			f, err := strconv.ParseFloat(n, 64)
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, token{kind: tNumber, num: f, text: s[i:j]})
-			i = j
+			out = append(out, token{kind: tNumber, num: f, text: n})
+			i += len(n)
 		case c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
-			j := i
-			for j < len(s) && (s[j] == '_' || s[j] == '.' || s[j] >= 'a' && s[j] <= 'z' || s[j] >= 'A' && s[j] <= 'Z' || s[j] >= '0' && s[j] <= '9') {
-				j++
-			}
-			word := s[i:j]
+			word := name.FindString(s[i:])
 			if keywords[strings.ToUpper(word)] {
 				out = append(out, token{kind: tKeyword, text: strings.ToUpper(word)})
 			} else {
 				out = append(out, token{kind: tIdent, text: word})
 			}
-			i = j
+			i += len(word)
 		default:
 			for _, op := range []string{"<>", "!=", "<=", ">=", "==", "=", "<", ">", "-", "+"} {
 				if strings.HasPrefix(s[i:], op) {
@@ -210,31 +163,25 @@ func (p *parser) keyword(k string) bool {
 var errSyntax = fmt.Errorf("syntax")
 
 func (p *parser) or() (Expr, error) {
-	l, err := p.and()
-	if err != nil {
-		return nil, err
-	}
-	for p.keyword("OR") {
-		r, err := p.and()
-		if err != nil {
-			return nil, err
-		}
-		l = orExpr{l, r}
-	}
-	return l, nil
+	return p.chain("OR", p.and)
 }
 
 func (p *parser) and() (Expr, error) {
-	l, err := p.not()
+	return p.chain("AND", p.not)
+}
+
+// chain parses operands joined by the keyword kw, left to right.
+func (p *parser) chain(kw string, operand func() (Expr, error)) (Expr, error) {
+	l, err := operand()
 	if err != nil {
 		return nil, err
 	}
-	for p.keyword("AND") {
-		r, err := p.not()
+	for p.keyword(kw) {
+		r, err := operand()
 		if err != nil {
 			return nil, err
 		}
-		l = andExpr{l, r}
+		l = logicExpr{kw == "AND", l, r}
 	}
 	return l, nil
 }
@@ -304,7 +251,7 @@ func (p *parser) predicate() (Expr, error) {
 			}
 			esc = t.text
 		}
-		return &likeExpr{v: l, pattern: pat, escape: esc, neg: neg}, nil
+		return &likeExpr{l, pat, esc, neg, map[string]*regexp.Regexp{}}, nil
 	case p.keyword("BETWEEN"):
 		lo, err := p.value()
 		if err != nil {
@@ -430,8 +377,10 @@ func parseTime(s string) (float64, error) {
 
 type lit struct{ v any }
 type field int
-type andExpr struct{ l, r Expr }
-type orExpr struct{ l, r Expr }
+type logicExpr struct {
+	and  bool
+	l, r Expr
+}
 type notExpr struct{ e Expr }
 type cmpExpr struct {
 	op   string
@@ -463,11 +412,11 @@ type funcExpr struct {
 
 func (e lit) eval(Row) any       { return e.v }
 func (e field) eval(row Row) any { return row(int(e)) }
-func (e andExpr) eval(row Row) any {
-	return js.Truthy(e.l.eval(row)) && js.Truthy(e.r.eval(row))
-}
-func (e orExpr) eval(row Row) any {
-	return js.Truthy(e.l.eval(row)) || js.Truthy(e.r.eval(row))
+func (e logicExpr) eval(row Row) any {
+	if js.Truthy(e.l.eval(row)) != e.and {
+		return !e.and // AND stops at a falsy operand, OR at a truthy one
+	}
+	return js.Truthy(e.r.eval(row))
 }
 func (e notExpr) eval(row Row) any { return !js.Truthy(e.e.eval(row)) }
 
@@ -517,9 +466,6 @@ func (e *likeExpr) eval(row Row) any {
 	re, ok := e.cache[p]
 	if !ok {
 		re = likeRegexp(p, e.escape)
-		if e.cache == nil {
-			e.cache = map[string]*regexp.Regexp{}
-		}
 		e.cache[p] = re
 	}
 	return re.MatchString(js.String(v)) != e.neg

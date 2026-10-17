@@ -83,14 +83,7 @@ func budget(key string, defMB int64, fraction float64, limit int64) int64 {
 
 func main() {
 	level := slog.LevelWarn
-	switch strings.ToLower(env("LOG_LEVEL", "warn")) {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "error":
-		level = slog.LevelError
-	}
+	_ = level.UnmarshalText([]byte(env("LOG_LEVEL", "warn"))) // unknown names stay at warn
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 

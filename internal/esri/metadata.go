@@ -87,26 +87,18 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 		o.Set("id", id)
 	}
 	o.Set("displayField", m.IDField)
-	if u, ok := o.Get("uniqueIdField"); ok {
-		u := u.(jsonx.Obj)
-		u.Set("name", m.IDField)
-		o.Set("uniqueIdField", u)
-	}
+	o.Set("uniqueIdField", jsonx.Obj{{K: "name", V: m.IDField}, {K: "isSystemMaintained", V: true}})
 	gt := GeometryType(m.GeometryType)
 	o.Set("geometryType", gt)
-	o.Set("supportsCoordinatesQuantization", false)
 	if m.Extent != nil {
 		o.Set("extent", extent(m.Extent))
 	}
-	di, _ := o.Get("drawingInfo")
-	drawing := di.(jsonx.Obj)
+	drawing := jsonx.Obj{{K: "renderer", V: renderer(gt)}, {K: "labelingInfo", V: nil}}
 	if truthy(m.Renderer) {
-		drawing.Set("renderer", jsonx.Raw(m.Renderer))
-	} else {
-		drawing.Set("renderer", renderer(gt))
+		drawing[0].V = jsonx.Raw(m.Renderer)
 	}
 	if truthy(m.LabelingInfo) {
-		drawing.Set("labelingInfo", jsonx.Raw(m.LabelingInfo))
+		drawing[1].V = jsonx.Raw(m.LabelingInfo)
 	}
 	o.Set("drawingInfo", drawing)
 	o.Set("name", m.Name)
@@ -136,12 +128,10 @@ func Server(m *Metadata) jsonx.Obj {
 	if m.MaxRecordCount != 0 {
 		o.Set("maxRecordCount", m.MaxRecordCount)
 	}
-	o.Set("spatialReference", jsonx.Obj{{K: "wkid", V: 4326}, {K: "latestWkid", V: 4326}})
 	if m.Extent != nil {
 		o.Set("fullExtent", extent(m.Extent))
 		o.Set("initialExtent", extent(m.Extent))
 	}
-	o.Set("tables", []any{})
 	var minScale any = 0
 	if truthy(m.MinScale) {
 		minScale = jsonx.Raw(m.MinScale)
@@ -151,8 +141,5 @@ func Server(m *Metadata) jsonx.Obj {
 		{K: "parentLayerId", V: -1}, {K: "defaultVisibility", V: true}, {K: "subLayerIds", V: nil},
 		{K: "minScale", V: minScale}, {K: "maxScale", V: 0}, {K: "geometryType", V: GeometryType(m.GeometryType)},
 	}})
-	o.Set("relationships", []any{})
-	o.Set("supportsRelationshipsResource", false)
-	o.Set("units", "esriDecimalDegrees")
 	return o
 }

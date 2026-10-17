@@ -74,7 +74,7 @@ func IDs(ids *query.IDs) []byte {
 	b := str(nil, 1, ids.IDField)
 	var packed []byte
 	for _, v := range ids.IDs {
-		if f, ok := number(v); ok {
+		if f, ok := js.AsNumber(v); ok {
 			packed = protowire.AppendVarint(packed, uint64(int64(f)))
 		}
 	}
@@ -181,16 +181,6 @@ func sortedOrder(attrs []jsonx.KV, types map[string]string) (keys []string, orde
 	return keys, order, kinds
 }
 
-func number(v any) (float64, bool) {
-	switch x := v.(type) {
-	case int64:
-		return float64(x), true
-	case float64:
-		return x, true
-	}
-	return 0, false
-}
-
 // toInt32 is JavaScript's `v | 0`.
 func toInt32(f float64) int32 {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
@@ -209,7 +199,7 @@ func value(b []byte, fieldType string, v any) []byte {
 	}
 	switch fieldType {
 	case "esriFieldTypeOID":
-		if f, ok := number(v); ok && f == math.Trunc(f) {
+		if f, ok := js.AsNumber(v); ok && f == math.Trunc(f) {
 			return varint(b, 5, uint64(uint32(toInt32(f))))
 		}
 		return str(b, 1, js.String(v))
@@ -281,19 +271,18 @@ func geometry(b []byte, g *geom.Esri, t Transform) []byte {
 			}
 		}
 	}
-	if len(lengths) > 0 {
-		var packed []byte
-		for _, l := range lengths {
-			packed = protowire.AppendVarint(packed, uint64(l))
-		}
-		b = message(b, 2, packed)
+	b = packed(b, 2, lengths, func(l uint32) uint64 { return uint64(l) })
+	return packed(b, 3, coords, protowire.EncodeZigZag)
+}
+
+// packed writes xs as one packed varint field, or nothing when there are none.
+func packed[T any](b []byte, num protowire.Number, xs []T, enc func(T) uint64) []byte {
+	if len(xs) == 0 {
+		return b
 	}
-	if len(coords) > 0 {
-		var packed []byte
-		for _, c := range coords {
-			packed = protowire.AppendVarint(packed, protowire.EncodeZigZag(c))
-		}
-		b = message(b, 3, packed)
+	var body []byte
+	for _, x := range xs {
+		body = protowire.AppendVarint(body, enc(x))
 	}
-	return b
+	return message(b, num, body)
 }

@@ -47,21 +47,11 @@ func (s *FeatureSet) AppendJSON(buf []byte) []byte {
 	buf = jsonx.AppendString(buf, s.IDField)
 	buf = append(buf, `,"isSystemMaintained":true},"globalIdFieldName":"","hasZ":false,"hasM":false,"spatialReference":`...)
 	buf = s.SR.AppendJSON(buf)
-	buf = append(buf, `,"fields":[`...)
-	for i, f := range s.Fields {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = jsonx.Append(buf, f.Obj)
-	}
-	buf = append(buf, `],"features":[`...)
-	for i, f := range s.Features {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = f.AppendJSON(buf)
-	}
-	buf = append(buf, `],"exceededTransferLimit":`...)
+	buf = append(buf, `,"fields":`...)
+	buf = jsonx.AppendArray(buf, s.Fields, func(b []byte, f esri.Field) []byte { return jsonx.Append(b, f.Obj) })
+	buf = append(buf, `,"features":`...)
+	buf = jsonx.AppendArray(buf, s.Features, func(b []byte, f EsriFeature) []byte { return f.AppendJSON(b) })
+	buf = append(buf, `,"exceededTransferLimit":`...)
 	buf = s.Exceeded.AppendJSON(buf)
 	if s.GeometryType != "" {
 		buf = append(buf, `,"geometryType":`...)

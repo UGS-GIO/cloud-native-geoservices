@@ -1,6 +1,7 @@
 package esri
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
@@ -66,13 +67,7 @@ func QueryFields(m *Metadata, outFields string) []Field {
 	for _, f := range strings.Split(outFields, ",") {
 		want[strings.TrimSpace(f)] = true
 	}
-	kept := out[:0]
-	for _, f := range out {
-		if want[f.Name] {
-			kept = append(kept, f)
-		}
-	}
-	return kept
+	return slices.DeleteFunc(out, func(f Field) bool { return !want[f.Name] })
 }
 
 // LayerFields are the layer description's fields: every field, marked not editable or nullable.

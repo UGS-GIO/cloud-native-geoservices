@@ -3,8 +3,8 @@
 package provider
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -84,11 +84,11 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	if err != nil {
 		return "", err
 	}
-	style, err := pr.Catalog.RendererVersion(ctx, item, render)
+	d, err := pr.Catalog.Drawing(ctx, item, render)
 	if err != nil {
 		return "", err
 	}
-	return item.Version + "|" + layer.ID() + "|" + style, nil
+	return item.Version + "|" + layer.ID() + "|" + d.Version, nil
 }
 
 // Open opens a data file, cached like the catalog.
@@ -132,13 +132,14 @@ func (pr *Provider) Load(ctx context.Context, topicID, render string, isQuery bo
 
 func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, render string, isQuery bool, params query.Raw) (*query.Collection, error) {
 	var layer *pq.Layer
-	var style map[string]json.RawMessage
+	var drawing *catalog.Drawing
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() (err error) { layer, err = pr.Open(gctx, item.Data()); return })
-	g.Go(func() (err error) { style, err = pr.Catalog.Renderer(gctx, item, render); return })
+	g.Go(func() (err error) { drawing, err = pr.Catalog.Drawing(gctx, item, render); return })
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	style := drawing.Info
 
 	name := topicID
 	if item.Title != nil {
@@ -162,7 +163,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	}
 	p, err := plan.New(params, plan.Layer{Columns: layer.Columns, Point: layer.Point}, maxRecords)
 	if err != nil {
-		return nil, &query.Error{Code: 400, Message: err.Error(), Details: []string{}}
+		return nil, query.Bad(err.Error())
 	}
 	// Small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
 	// than the request (vector/sink_archive.py).
@@ -172,18 +173,13 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 			return nil, err
 		}
 		if p, err = plan.New(params, plan.Layer{Columns: source.Columns, Point: source.Point}, maxRecords); err != nil {
-			return nil, &query.Error{Code: 400, Message: err.Error(), Details: []string{}}
+			return nil, query.Bad(err.Error())
 		}
 	}
-	switch p.Kind {
-	case plan.Count:
+	if p.Kind != plan.Features {
 		n := layer.Rows
 		c.Count = &n
-		return c, nil
-	case plan.Extent:
-		n := layer.Rows
-		c.Count = &n
-		if layer.Extent != nil {
+		if p.Kind == plan.Extent && layer.Extent != nil {
 			c.Extent = projectExtent(layer.Extent, p.OutSR)
 		}
 		return c, nil
@@ -233,28 +229,12 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	// smallest: flagging it exceeded makes Map Viewer split it into four and ask again, repeatedly.
 	tile := params["resultType"] == "tile" && thin
 	if tile && int64(len(feats)) > limit {
-		sizes := make([]float64, len(feats))
-		order := make([]int, len(feats))
 		for i := range feats {
-			order[i] = i
 			if !feats[i].speck {
-				sizes[i] = spread(feats[i].f.Geom)
+				feats[i].size = spread(feats[i].f.Geom)
 			}
 		}
-		slices.SortStableFunc(order, func(a, b int) int {
-			switch {
-			case sizes[a] > sizes[b]:
-				return -1
-			case sizes[a] < sizes[b]:
-				return 1
-			}
-			return 0
-		})
-		sorted := make([]shaped, len(feats))
-		for i, o := range order {
-			sorted[i] = feats[o]
-		}
-		feats = sorted
+		slices.SortStableFunc(feats, func(a, b shaped) int { return cmp.Compare(b.size, a.size) })
 	}
 	// Mirrors JavaScript's `!tile && (over || (thin && read past))`, where thin is null without a page.
 	switch {
@@ -287,6 +267,7 @@ type cell struct {
 type shaped struct {
 	f     query.Feature
 	speck bool
+	size  float64 // spread, when ranking a tile's features
 }
 
 // features reads the plan's columns (and geometry) at rows and builds the features, thinning
@@ -325,7 +306,7 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 			g = shapes[i].G
 		}
 		if thin && shapes[i].Speck {
-			if x, y, ok := firstPoint(g); ok {
+			if pt, ok := firstPoint(g); ok {
 				class.Reset()
 				first := true
 				for c, name := range p.Columns {
@@ -338,14 +319,14 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 					first = false
 					class.WriteString(js.Join(props[c]))
 				}
-				k := cell{math.Floor(x / p.Tolerance), math.Floor(y / p.Tolerance), class.String()}
+				k := cell{math.Floor(pt[0] / p.Tolerance), math.Floor(pt[1] / p.Tolerance), class.String()}
 				if cells[k] {
 					continue
 				}
 				cells[k] = true
 			}
 		}
-		out = append(out, shaped{query.Feature{Props: props, Geom: g}, shapes[i].Speck})
+		out = append(out, shaped{f: query.Feature{Props: props, Geom: g}, speck: shapes[i].Speck})
 	}
 	return out, nil
 }
@@ -450,18 +431,15 @@ func (pr *Provider) admit(ctx context.Context, n int64) (func(), error) {
 	}, nil
 }
 
-func firstPoint(g orb.Geometry) (float64, float64, bool) {
-	switch x := g.(type) {
-	case orb.Polygon:
-		if len(x) > 0 && len(x[0]) > 0 {
-			return x[0][0][0], x[0][0][1], true
-		}
-	case orb.MultiPolygon:
-		if len(x) > 0 && len(x[0]) > 0 && len(x[0][0]) > 0 {
-			return x[0][0][0][0], x[0][0][0][1], true
-		}
+// firstPoint is the first point of a polygon or of a multipolygon's first member.
+func firstPoint(g orb.Geometry) (orb.Point, bool) {
+	if mp, ok := g.(orb.MultiPolygon); ok && len(mp) > 0 {
+		g = mp[0]
 	}
-	return 0, 0, false
+	if p, ok := g.(orb.Polygon); ok && len(p) > 0 && len(p[0]) > 0 {
+		return p[0][0], true
+	}
+	return orb.Point{}, false
 }
 
 // spread is width plus height of a geometry's bounds, to rank features by how much they cover.
@@ -484,11 +462,9 @@ func overview(item *catalog.Item, tolerance float64) string {
 
 func projectExtent(e *[4]float64, wkid int) jsonx.Obj {
 	if !geom.Mercator[wkid] {
-		return jsonx.Obj{{K: "xmin", V: e[0]}, {K: "ymin", V: e[1]}, {K: "xmax", V: e[2]}, {K: "ymax", V: e[3]},
-			{K: "spatialReference", V: jsonx.Obj{{K: "wkid", V: 4326}}}}
+		return query.Extent(jsonx.Obj{{K: "wkid", V: 4326}}, e[0], e[1], e[2], e[3])
 	}
 	xmin, ymin := geom.ExtentToMercator(e[0], e[1])
 	xmax, ymax := geom.ExtentToMercator(e[2], e[3])
-	return jsonx.Obj{{K: "xmin", V: xmin}, {K: "ymin", V: ymin}, {K: "xmax", V: xmax}, {K: "ymax", V: ymax},
-		{K: "spatialReference", V: jsonx.Obj{{K: "wkid", V: 102100}, {K: "latestWkid", V: 3857}}}}
+	return query.Extent(jsonx.Obj{{K: "wkid", V: 102100}, {K: "latestWkid", V: 3857}}, xmin, ymin, xmax, ymax)
 }

@@ -64,24 +64,22 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	})
 }
 
-func bad(msg string) error { return &query.Error{Code: 400, Message: msg, Details: []string{}} }
-
 // params reads the query string and a size-limited form or JSON body.
 func (s *Server) params(r *http.Request) (query.Params, query.Raw, error) {
 	body := url.Values{}
 	if r.Method == http.MethodPost && r.Body != nil {
 		b, err := io.ReadAll(io.LimitReader(r.Body, s.Limits.MaxBody+1))
 		if err != nil {
-			return nil, nil, bad("Could not read the request body")
+			return nil, nil, query.Bad("Could not read the request body")
 		}
 		if int64(len(b)) > s.Limits.MaxBody {
-			return nil, nil, bad(fmt.Sprintf("Request body is larger than %d bytes", s.Limits.MaxBody))
+			return nil, nil, query.Bad(fmt.Sprintf("Request body is larger than %d bytes", s.Limits.MaxBody))
 		}
 		switch ct := r.Header.Get("Content-Type"); {
 		case strings.HasPrefix(ct, "application/json"):
 			var m map[string]any
 			if json.Unmarshal(b, &m) != nil {
-				return nil, nil, bad("Malformed JSON body")
+				return nil, nil, query.Bad("Malformed JSON body")
 			}
 			for k, v := range m {
 				if str, ok := v.(string); ok {
@@ -93,7 +91,7 @@ func (s *Server) params(r *http.Request) (query.Params, query.Raw, error) {
 			}
 		case strings.HasPrefix(ct, "application/x-www-form-urlencoded"):
 			if body, err = url.ParseQuery(string(b)); err != nil {
-				return nil, nil, bad("Malformed form body")
+				return nil, nil, query.Bad("Malformed form body")
 			}
 		}
 		r.PostForm = body
@@ -107,11 +105,11 @@ var listSep = regexp.MustCompile(`\s*,\s*`)
 // checkLimits rejects requests too large to be reasonable.
 func (s *Server) checkLimits(raw query.Raw) error {
 	if n := len([]rune(raw["where"])); s.Limits.MaxWhere > 0 && n > s.Limits.MaxWhere {
-		return bad(fmt.Sprintf("'where' is %d characters; the limit is %d", n, s.Limits.MaxWhere))
+		return query.Bad(fmt.Sprintf("'where' is %d characters; the limit is %d", n, s.Limits.MaxWhere))
 	}
 	if ids := raw["objectIds"]; ids != "" && s.Limits.MaxObjectIDs > 0 {
 		if n := len(listSep.Split(ids, -1)); n > s.Limits.MaxObjectIDs {
-			return bad(fmt.Sprintf("'objectIds' has %d ids; the limit is %d", n, s.Limits.MaxObjectIDs))
+			return query.Bad(fmt.Sprintf("'objectIds' has %d ids; the limit is %d", n, s.Limits.MaxObjectIDs))
 		}
 	}
 	return nil

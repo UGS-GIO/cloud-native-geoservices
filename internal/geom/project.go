@@ -42,51 +42,6 @@ func ToLonLat(p orb.Point) orb.Point {
 	return orb.Point{lon * r2d, lat * r2d}
 }
 
-// Map applies f to every coordinate, returning a new geometry.
-func Map(g orb.Geometry, f func(orb.Point) orb.Point) orb.Geometry {
-	switch g := g.(type) {
-	case orb.Point:
-		return f(g)
-	case orb.MultiPoint:
-		return orb.MultiPoint(mapPoints(g, f))
-	case orb.LineString:
-		return orb.LineString(mapPoints(g, f))
-	case orb.MultiLineString:
-		out := make(orb.MultiLineString, len(g))
-		for i, l := range g {
-			out[i] = mapPoints(l, f)
-		}
-		return out
-	case orb.Ring:
-		return orb.Ring(mapPoints(g, f))
-	case orb.Polygon:
-		return mapPolygon(g, f)
-	case orb.MultiPolygon:
-		out := make(orb.MultiPolygon, len(g))
-		for i, p := range g {
-			out[i] = mapPolygon(p, f)
-		}
-		return out
-	}
-	return g
-}
-
-func mapPoints[S ~[]orb.Point](ps S, f func(orb.Point) orb.Point) S {
-	out := make(S, len(ps))
-	for i, p := range ps {
-		out[i] = f(p)
-	}
-	return out
-}
-
-func mapPolygon(p orb.Polygon, f func(orb.Point) orb.Point) orb.Polygon {
-	out := make(orb.Polygon, len(p))
-	for i, r := range p {
-		out[i] = mapPoints(r, f)
-	}
-	return out
-}
-
 // ExtentToMercator projects lon/lat bounds the way the provider does for returnExtentOnly:
 // latitude clamped to ±85.0511.
 func ExtentToMercator(lon, lat float64) (float64, float64) {

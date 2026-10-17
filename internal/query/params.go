@@ -21,21 +21,14 @@ type Raw map[string]string
 
 // Normalize builds both views of a request.
 func Normalize(query, body url.Values) (Params, Raw) {
-	raw := Raw{}
+	p, raw := Params{}, Raw{}
 	for _, src := range []url.Values{body, query} {
 		for k, v := range src {
-			if v[0] != "" || raw[k] == "" {
+			if v[0] != "" {
+				raw[k], p[k] = v[0], coerce(v[0])
+			} else if raw[k] == "" {
 				raw[k] = v[0]
 			}
-		}
-	}
-	p := Params{}
-	for _, src := range []url.Values{body, query} {
-		for k, v := range src {
-			if v[0] == "" {
-				continue
-			}
-			p[k] = coerce(v[0])
 		}
 	}
 	return p, raw
@@ -64,9 +57,6 @@ func (p Params) String(k string) (string, bool) { s, ok := p[k].(string); return
 // Number is the parameter when it is a number.
 func (p Params) Number(k string) (float64, bool) { f, ok := p[k].(float64); return f, ok }
 
-// Has reports a parameter that is present.
-func (p Params) Has(k string) bool { _, ok := p[k]; return ok }
-
 // Format is f, defaulting to json.
 func (p Params) Format() string {
 	if f, ok := p["f"].(string); ok {
@@ -84,7 +74,8 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
-func bad(msg string, details ...string) *Error {
+// Bad is a 400 error; details default to none.
+func Bad(msg string, details ...string) *Error {
 	if details == nil {
 		details = []string{}
 	}
@@ -100,65 +91,53 @@ func (p Params) Validate() error {
 		switch s {
 		case "json", "pjson", "pbf", "geojson":
 		default:
-			return bad("Invalid format", `"f" must be one of [json, pjson, pbf, geojson]`)
+			return Bad("Invalid format", `"f" must be one of [json, pjson, pbf, geojson]`)
 		}
 	}
-	for _, k := range []string{"resultRecordCount", "resultOffset"} {
-		if v, ok := p[k]; ok {
-			if _, num := v.(float64); !num {
-				m := `"` + k + `" must be a number`
-				return bad(m, m)
-			}
-		}
-	}
-	for _, k := range []string{"returnGeometry", "returnCountOnly"} {
-		if v, ok := p[k]; ok {
-			if _, b := v.(bool); !b {
-				m := `"` + k + `" must be a boolean`
-				return bad(m, m)
-			}
-		}
-	}
-	for _, k := range []string{"outFields", "orderByFields"} {
-		if v, ok := p[k]; ok {
-			if _, s := v.(string); !s {
-				m := `"` + k + `" must be a string`
-				return bad(m, m)
-			}
+	for _, c := range [][2]string{{"resultRecordCount", "number"}, {"resultOffset", "number"},
+		{"returnGeometry", "boolean"}, {"returnCountOnly", "boolean"}, {"outFields", "string"}, {"orderByFields", "string"}} {
+		if v, ok := p[c[0]]; ok && typeOf(v) != c[1] {
+			m := `"` + c[0] + `" must be a ` + c[1]
+			return Bad(m, m)
 		}
 	}
 	if v, ok := p["objectIds"]; ok {
-		switch x := v.(type) {
-		case string:
-		case float64:
-			if !isInt(x) {
-				m := `"objectIds" does not match any of the allowed types`
-				return bad(m, m)
-			}
-		default:
+		if f, num := v.(float64); typeOf(v) != "string" && !(num && isInt(f)) {
 			m := `"objectIds" does not match any of the allowed types`
-			return bad(m, m)
+			return Bad(m, m)
 		}
 	}
 	if v, ok := p["outSR"]; ok {
 		if _, ok := wkid(v); !ok {
 			m := `"outSR" does not match any of the allowed types`
-			return bad(m, m)
+			return Bad(m, m)
 		}
 	}
 	if v, ok := p["quantizationParameters"]; ok {
 		if _, ok := ParseQuantization(v); !ok {
-			return bad("'quantizationParameters' parameter is invalid", `"quantizationParameters" must be of type object`)
+			return Bad("'quantizationParameters' parameter is invalid", `"quantizationParameters" must be of type object`)
 		}
 	}
 	for _, k := range []string{"outSR", "inSR"} {
 		if v, ok := p[k]; ok {
 			if id, ok := wkid(v); ok && !supported(id) {
-				return bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326 and Web Mercator (102100, 3857) are supported")
+				return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326 and Web Mercator (102100, 3857) are supported")
 			}
 		}
 	}
 	return nil
+}
+
+func typeOf(v any) string {
+	switch v.(type) {
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case string:
+		return "string"
+	}
+	return ""
 }
 
 func supported(id int) bool {

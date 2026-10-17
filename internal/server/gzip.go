@@ -60,8 +60,5 @@ func acceptsGzip(r *http.Request) bool {
 
 // gzipTag marks the ETag of the gzipped representation, which must differ from the plain one.
 func gzipTag(tag string) string {
-	if tag == "" {
-		return ""
-	}
 	return strings.TrimSuffix(tag, `"`) + `-gzip"`
 }

@@ -70,7 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer/{layer}/{op}", s.service)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/{rest...}", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.PathValue("rest"), "MapServer") {
-			s.fail(w, r, &query.Error{Code: 400, Message: "Invalid URL", Details: []string{"Invalid URL"}})
+			s.fail(w, r, query.Bad("Invalid URL", "Invalid URL"))
 			return
 		}
 		notFound(w, r)
@@ -136,7 +136,7 @@ func (s *Server) restInfo(w http.ResponseWriter, r *http.Request) {
 func infoFormat(p query.Params) error {
 	if v, ok := p["f"]; ok {
 		if f, _ := v.(string); f != "json" && f != "pjson" {
-			return &query.Error{Code: 400, Message: "Invalid format", Details: []string{}}
+			return query.Bad("Invalid format")
 		}
 	}
 	return nil

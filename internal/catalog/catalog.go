@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -120,31 +121,16 @@ func (c *Catalog) Topic(ctx context.Context, id string) (*Item, error) {
 	return it, nil
 }
 
-// Renderer is the Esri drawing info for one render: renderer, labelingInfo, minScale (raw JSON),
-// or an empty map for a render with no esri_url.
-func (c *Catalog) Renderer(ctx context.Context, it *Item, name string) (map[string]json.RawMessage, error) {
-	d, err := c.drawing(ctx, it, name)
-	if err != nil {
-		return nil, err
-	}
-	return d.info, nil
+// Drawing is the Esri drawing info for one render.
+type Drawing struct {
+	// Info is renderer, labelingInfo, minScale (raw JSON); empty for a render with no esri_url.
+	Info map[string]json.RawMessage
+	// Version changes when the render's Esri JSON does, though its URL stays the same.
+	Version string
 }
 
-// RendererVersion changes when the render's Esri JSON does, though its URL stays the same.
-func (c *Catalog) RendererVersion(ctx context.Context, it *Item, name string) (string, error) {
-	d, err := c.drawing(ctx, it, name)
-	if err != nil {
-		return "", err
-	}
-	return d.version, nil
-}
-
-type drawing struct {
-	info    map[string]json.RawMessage
-	version string
-}
-
-func (c *Catalog) drawing(ctx context.Context, it *Item, name string) (*drawing, error) {
+// Drawing is one render's drawing info.
+func (c *Catalog) Drawing(ctx context.Context, it *Item, name string) (*Drawing, error) {
 	var r *Render
 	names := make([]string, len(it.Renders))
 	for i := range it.Renders {
@@ -157,7 +143,7 @@ func (c *Catalog) drawing(ctx context.Context, it *Item, name string) (*drawing,
 		return nil, &Error{404, fmt.Sprintf("unknown render '%s' for %s (have: %s)", name, it.ID, strings.Join(names, ", "))}
 	}
 	if r.EsriURL == "" {
-		return &drawing{info: map[string]json.RawMessage{}}, nil
+		return &Drawing{Info: map[string]json.RawMessage{}}, nil
 	}
 	v, err := c.Cache.Get("esri:"+r.EsriURL, func() (any, error) {
 		raw, err := c.getBytes(ctx, r.EsriURL)
@@ -170,12 +156,12 @@ func (c *Catalog) drawing(ctx context.Context, it *Item, name string) (*drawing,
 		}
 		h := fnv.New64a()
 		h.Write(raw)
-		return &drawing{doc, strconv.FormatUint(h.Sum64(), 36)}, nil
+		return &Drawing{doc, strconv.FormatUint(h.Sum64(), 36)}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.(*drawing), nil
+	return v.(*Drawing), nil
 }
 
 // GetBytes reads a URL or local file.
@@ -256,10 +242,10 @@ func parseTopics(raw []byte) (*topics, error) {
 		if it.Data() == "" {
 			continue
 		}
-		if raw, ok := d.Properties["title"]; ok {
+		if raw := d.Properties["title"]; raw != nil {
 			_ = json.Unmarshal(raw, &it.Title)
 		}
-		if raw, ok := d.Properties["description"]; ok {
+		if raw := d.Properties["description"]; raw != nil {
 			_ = json.Unmarshal(raw, &it.Description)
 		}
 		renders, _ := ObjectFields(d.Properties["ugs:renders"])
@@ -274,14 +260,10 @@ func parseTopics(raw []byte) (*topics, error) {
 		if len(it.Renders) == 0 {
 			it.Renders = []Render{{Name: "default"}}
 		}
-		if _, dup := t.byID[it.ID]; !dup {
-			t.order = append(t.order, it)
+		if prev, ok := t.byID[it.ID]; ok {
+			t.order[slices.Index(t.order, prev)] = it
 		} else {
-			for i, o := range t.order {
-				if o.ID == it.ID {
-					t.order[i] = it
-				}
-			}
+			t.order = append(t.order, it)
 		}
 		t.byID[it.ID] = it
 	}

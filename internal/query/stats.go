@@ -27,12 +27,12 @@ func (w *winnow) parseStatistics() error {
 	}
 	list, ok := v.([]any)
 	if !ok {
-		return bad("Invalid outStatistics")
+		return Bad("Invalid outStatistics")
 	}
 	for _, e := range list {
 		m, ok := e.(map[string]any)
 		if !ok {
-			return bad("Invalid outStatistics")
+			return Bad("Invalid outStatistics")
 		}
 		kind, _ := m["statisticType"].(string)
 		field, _ := m["onStatisticField"].(string)
@@ -44,7 +44,7 @@ func (w *winnow) parseStatistics() error {
 		switch a.kind {
 		case "COUNT", "SUM", "MIN", "MAX", "AVG", "STDDEV", "VAR":
 		default:
-			return bad("Unsupported statisticType: " + kind)
+			return Bad("Unsupported statisticType: " + kind)
 		}
 		w.aggregates = append(w.aggregates, a)
 	}
@@ -58,46 +58,28 @@ func (w *winnow) parseStatistics() error {
 
 type accumulator struct {
 	count      int64
+	nums       int64
 	sum, sumSq float64
-	hasSum     bool
 	min, max   float64
-	hasMinMax  bool
 	n          int64 // values seen, nulls included (stddev counts them as 0, like alasql)
-	varCount   int64
-	varSum     float64
-	varSumSq   float64
-}
-
-func number(v any) (float64, bool) {
-	switch x := v.(type) {
-	case int64:
-		return float64(x), true
-	case float64:
-		return x, true
-	}
-	return 0, false
 }
 
 func (a *accumulator) add(v any) {
-	x, isNum := number(v)
+	x, isNum := js.AsNumber(v)
 	a.n++
 	if v != nil {
 		a.count++
 	}
 	if isNum {
 		a.sum += x
-		a.hasSum = true
-		if !a.hasMinMax || x < a.min {
+		if a.nums == 0 || x < a.min {
 			a.min = x
 		}
-		if !a.hasMinMax || x > a.max {
+		if a.nums == 0 || x > a.max {
 			a.max = x
 		}
-		a.hasMinMax = true
 		a.sumSq += x * x
-		a.varCount++
-		a.varSum += x
-		a.varSumSq += x * x
+		a.nums++
 	}
 }
 
@@ -105,19 +87,15 @@ func (a *accumulator) result(kind string) any {
 	switch kind {
 	case "COUNT":
 		return a.count
-	case "SUM":
-		if !a.hasSum {
+	case "SUM", "MIN", "MAX":
+		if a.nums == 0 {
 			return jsonx.Undefined
 		}
-		return a.sum
-	case "MIN":
-		if !a.hasMinMax {
-			return jsonx.Undefined
-		}
-		return a.min
-	case "MAX":
-		if !a.hasMinMax {
-			return jsonx.Undefined
+		switch kind {
+		case "SUM":
+			return a.sum
+		case "MIN":
+			return a.min
 		}
 		return a.max
 	case "AVG":
@@ -126,9 +104,9 @@ func (a *accumulator) result(kind string) any {
 		}
 		return a.sum / float64(a.count)
 	case "VAR":
-		if a.varCount > 1 {
+		if a.nums > 1 {
 			// Round-off can leave a constant column a hair below zero.
-			return max(0, (a.varSumSq-a.varSum*a.varSum/float64(a.varCount))/float64(a.varCount-1))
+			return max(0, (a.sumSq-a.sum*a.sum/float64(a.nums))/float64(a.nums-1))
 		}
 		return 0.0
 	case "STDDEV":

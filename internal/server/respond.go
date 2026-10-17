@@ -77,7 +77,7 @@ func encodeQuery(p query.Params, res *query.Response) (*encoded, error) {
 		}
 		body = pbf.Features(res.Features, pbf.TransformFor(q, res.Features.SR.Wkid))
 	default:
-		return nil, &query.Error{Code: 400, Message: "Bad Request", Details: []string{}}
+		return nil, query.Bad("Bad Request")
 	}
 	return &encoded{body: body, contentType: "application/x-protobuf", pbf: true}, nil
 }

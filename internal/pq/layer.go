@@ -12,7 +12,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"math"
-	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/parquet-go/parquet-go"
@@ -76,8 +76,6 @@ func (l *Layer) Version() string { return l.file.Version }
 // Has reports whether the file has a top-level column called name.
 func (l *Layer) Has(name string) bool { _, ok := l.leaves[name]; return ok }
 
-var zLike = regexp.MustCompile(` Z$`)
-
 // Open reads the file's footer and works out its schema, geometry type, extent and row groups.
 func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	f, err := r.store.Open(ctx, url)
@@ -106,31 +104,25 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		l.Geom = "geom"
 	}
 
-	// Walk the flattened schema: top-level fields, and the leaf column index of each primitive.
-	schema := md.Schema
-	leafIndex := 0
-	for i := 1; i < len(schema); {
-		el := &schema[i]
-		if n, ok := el.NumChildren.Get(); ok && n > 0 {
-			skip, leaves := subtree(schema, i)
-			i += skip
-			leafIndex += leaves
+	// The schema elements of the leaf columns, by leaf column index; top-level leaves are fields.
+	var elements []*format.SchemaElement
+	for i := range md.Schema {
+		if md.Schema[i].Type.Valid {
+			elements = append(elements, &md.Schema[i])
+		}
+	}
+	for _, c := range pf.Root().Columns() {
+		if !c.Leaf() {
 			continue
 		}
+		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		l.leaves[el.Name] = leaf{leafIndex, kind, conv}
+		l.leaves[el.Name] = leaf{c.Index(), kind, conv}
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
-		leafIndex++
-		i++
 	}
-	l.HasBBox = true
-	for _, n := range BBox {
-		if !l.Has(n) {
-			l.HasBBox = false
-		}
-	}
+	l.HasBBox = !slices.ContainsFunc(BBox, func(n string) bool { return !l.Has(n) })
 
 	var start int64
 	for _, rg := range md.RowGroups {
@@ -150,13 +142,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		}
 		l.Extent = &e
 	}
-	var types []string
-	if c, ok := geo.Columns[l.Geom]; ok {
-		types = c.Types
-	}
 	t := ""
-	if len(types) > 0 {
-		t = zLike.ReplaceAllString(types[0], "")
+	if types := geo.Columns[l.Geom].Types; len(types) > 0 {
+		t = types[0]
 	}
 	switch {
 	case strings.Contains(t, "Point"):
@@ -168,33 +156,13 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	}
 	l.Point = l.GeometryType == "Point"
 	// feature_id is the row number + 1 in every archive we write; trust it only where stats say so.
-	l.IDIsRow = true
-	for _, g := range l.Groups {
-		if g.IDMin != float64(g.Start+1) || g.IDMax != float64(g.Start+g.Rows) {
-			l.IDIsRow = false
-		}
-	}
+	l.IDIsRow = !slices.ContainsFunc(l.Groups, func(g Group) bool {
+		return g.IDMin != float64(g.Start+1) || g.IDMax != float64(g.Start+g.Rows)
+	})
 	if gl, ok := l.leaves[l.Geom]; ok && len(md.RowGroups) > 0 {
 		l.Paged = md.RowGroups[0].Columns[gl.index].OffsetIndexOffset != 0
 	}
 	return l, nil
-}
-
-// subtree is how many schema elements and leaves the group at i spans.
-func subtree(schema []format.SchemaElement, i int) (elements, leaves int) {
-	n, _ := schema[i].NumChildren.Get()
-	elements = 1
-	for c := 0; c < int(n); c++ {
-		if k, ok := schema[i+elements].NumChildren.Get(); ok && k > 0 {
-			e, l := subtree(schema, i+elements)
-			elements += e
-			leaves += l
-		} else {
-			elements++
-			leaves++
-		}
-	}
-	return
 }
 
 // stat is a row group's min or max statistic for a numeric column, NaN when absent.
@@ -352,20 +320,15 @@ func (l *Layer) GeomBytes(rows []int64) int64 {
 		return 0
 	}
 	var n int64
-	for i := 0; i < len(rows); {
-		g := l.groupOf(rows[i])
-		first, end := l.Groups[g].Start, l.Groups[g].Start+l.Groups[g].Rows
-		var rel []int64
-		for ; i < len(rows) && rows[i] < end; i++ {
-			rel = append(rel, rows[i]-first)
-		}
-		lay, known := l.reader.layouts.Get(chunkKey{l.ID(), lf.index, g})
+	spans, _ := l.spans(rows)
+	for _, sp := range spans {
+		lay, known := l.reader.layouts.Get(chunkKey{l.ID(), lf.index, sp.g})
 		if !known {
-			start, stop := l.chunkRange(lf, g)
+			start, stop := l.chunkRange(lf, sp.g)
 			n += stop - start
 			continue
 		}
-		for _, p := range pagesFor(lay.firsts(), rel) {
+		for _, p := range pagesFor(lay.firsts(), sp.rel) {
 			n += lay.pages[p].size
 		}
 	}

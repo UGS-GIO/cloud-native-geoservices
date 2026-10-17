@@ -224,46 +224,29 @@ func (r *reader) geometry() (orb.Geometry, error) {
 	}
 	switch typ {
 	case 4:
-		out := make(orb.MultiPoint, 0, n)
-		for i := 0; i < n; i++ {
-			if _, _, err := r.header(); err != nil {
-				return nil, err
-			}
-			p, err := r.point(dims)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, p)
-		}
-		return out, nil
+		return members[orb.MultiPoint](r, n, dims, r.point)
 	case 5:
-		out := make(orb.MultiLineString, 0, n)
-		for i := 0; i < n; i++ {
-			if _, _, err := r.header(); err != nil {
-				return nil, err
-			}
-			l, err := r.line(dims)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, l)
-		}
-		return out, nil
+		return members[orb.MultiLineString](r, n, dims, r.line)
 	case 6:
-		out := make(orb.MultiPolygon, 0, n)
-		for i := 0; i < n; i++ {
-			if _, _, err := r.header(); err != nil {
-				return nil, err
-			}
-			p, err := r.polygon(dims)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, p)
-		}
-		return out, nil
+		return members[orb.MultiPolygon](r, n, dims, r.polygon)
 	}
 	return nil, fmt.Errorf("unsupported WKB geometry type %d", typ)
+}
+
+// members reads the n member geometries of a multi geometry.
+func members[S ~[]T, T any](r *reader, n, dims int, read func(int) (T, error)) (S, error) {
+	out := make(S, 0, n)
+	for range n {
+		if _, _, err := r.header(); err != nil {
+			return nil, err
+		}
+		m, err := read(dims)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // FromWKB reads WKB into a 2D geometry simplified to tolerance (degrees); ok is false for no

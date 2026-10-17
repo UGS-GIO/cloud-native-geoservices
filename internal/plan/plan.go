@@ -157,10 +157,7 @@ func FilterBox(params map[string]string) *[4]float64 {
 			return nil
 		}
 	}
-	wkid := 0
-	if s, ok := params["inSR"]; ok {
-		wkid = WkidOf(s)
-	}
+	wkid := WkidOf(params["inSR"])
 	if wkid == 0 && obj != nil {
 		wkid = WkidOf(obj["spatialReference"])
 	}
@@ -209,16 +206,13 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 		p.IDs = append(p.IDs, int64(n))
 	}
 	simple := TrivialWhere(params)
-	if s, ok := params["outSR"]; ok {
-		p.OutSR = WkidOf(s)
-	}
+	p.OutSR = WkidOf(params["outSR"])
 	countOnly, extentOnly := isTrue(params["returnCountOnly"]), isTrue(params["returnExtentOnly"])
-	if simple && p.Box == nil && len(p.IDs) == 0 && countOnly && !extentOnly {
+	if simple && p.Box == nil && len(p.IDs) == 0 && (countOnly || extentOnly) {
 		p.Kind = Count
-		return p, nil
-	}
-	if simple && p.Box == nil && len(p.IDs) == 0 && extentOnly {
-		p.Kind = Extent
+		if extentOnly {
+			p.Kind = Extent
+		}
 		return p, nil
 	}
 
@@ -259,16 +253,9 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 		p.Geometry = true
 	}
 	p.Present = stats && !p.Geometry
-	offset := math.NaN()
-	if s, ok := params["maxAllowableOffset"]; ok {
-		offset = js.ParseNumber(s)
-	}
-	if p.Geometry && !layer.Point && !math.IsNaN(offset) && !math.IsInf(offset, 0) && offset > 0 {
-		out := p.OutSR
-		if out == 0 {
-			out = 4326
-		}
-		if geom.Mercator[out] {
+	offset := js.ParseNumber(params["maxAllowableOffset"])
+	if p.Geometry && !layer.Point && !math.IsInf(offset, 0) && offset > 0 {
+		if geom.Mercator[p.OutSR] {
 			p.Tolerance = offset / 111320
 		} else {
 			p.Tolerance = offset

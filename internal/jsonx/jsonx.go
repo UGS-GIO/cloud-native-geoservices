@@ -51,16 +51,6 @@ func (o Obj) Get(k string) (any, bool) {
 	return nil, false
 }
 
-// Delete removes k.
-func (o *Obj) Delete(k string) {
-	for i := range *o {
-		if (*o)[i].K == k {
-			*o = append((*o)[:i], (*o)[i+1:]...)
-			return
-		}
-	}
-}
-
 // Marshal encodes v.
 func Marshal(v any) []byte { return Append(nil, v) }
 
@@ -111,50 +101,15 @@ func Append(buf []byte, v any) []byte {
 		}
 		return append(buf, '}')
 	case []any:
-		buf = append(buf, '[')
-		for i, e := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = Append(buf, e)
-		}
-		return append(buf, ']')
+		return AppendArray(buf, x, Append)
 	case []Obj:
-		buf = append(buf, '[')
-		for i, e := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = Append(buf, e)
-		}
-		return append(buf, ']')
+		return AppendArray(buf, x, appendAny[Obj])
 	case []string:
-		buf = append(buf, '[')
-		for i, e := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = AppendString(buf, e)
-		}
-		return append(buf, ']')
+		return AppendArray(buf, x, AppendString)
 	case []int64:
-		buf = append(buf, '[')
-		for i, e := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = Append(buf, e)
-		}
-		return append(buf, ']')
+		return AppendArray(buf, x, appendAny[int64])
 	case []float64:
-		buf = append(buf, '[')
-		for i, e := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = AppendNumber(buf, e)
-		}
-		return append(buf, ']')
+		return AppendArray(buf, x, AppendNumber)
 	default:
 		b, err := json.Marshal(x)
 		if err != nil {
@@ -162,6 +117,20 @@ func Append(buf []byte, v any) []byte {
 		}
 		return append(buf, b...)
 	}
+}
+
+func appendAny[T any](buf []byte, v T) []byte { return Append(buf, v) }
+
+// AppendArray writes xs as a JSON array, each element with f.
+func AppendArray[T any](buf []byte, xs []T, f func([]byte, T) []byte) []byte {
+	buf = append(buf, '[')
+	for i, x := range xs {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = f(buf, x)
+	}
+	return append(buf, ']')
 }
 
 // AppendNumber prints f like JavaScript's Number#toString.

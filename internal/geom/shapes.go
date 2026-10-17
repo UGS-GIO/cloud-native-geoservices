@@ -89,26 +89,22 @@ func size(g orb.Geometry) int64 {
 		return 24 + 16*int64(len(g))
 	case orb.LineString:
 		return 24 + 16*int64(len(g))
-	case orb.MultiLineString:
-		n := int64(24)
-		for _, l := range g {
-			n += size(l)
-		}
-		return n
 	case orb.Ring:
 		return 24 + 16*int64(len(g))
+	case orb.MultiLineString:
+		return sizes(g)
 	case orb.Polygon:
-		n := int64(24)
-		for _, r := range g {
-			n += size(r)
-		}
-		return n
+		return sizes(g)
 	case orb.MultiPolygon:
-		n := int64(24)
-		for _, p := range g {
-			n += size(p)
-		}
-		return n
+		return sizes(g)
 	}
 	return 16
+}
+
+func sizes[S ~[]T, T orb.Geometry](s S) int64 {
+	n := int64(24)
+	for _, m := range s {
+		n += size(m)
+	}
+	return n
 }

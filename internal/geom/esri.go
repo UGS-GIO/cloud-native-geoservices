@@ -1,6 +1,8 @@
 package geom
 
 import (
+	"slices"
+
 	"github.com/paulmach/orb"
 
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
@@ -35,11 +37,7 @@ func ToEsri(g orb.Geometry) (Esri, bool) {
 	case orb.LineString:
 		return Esri{Kind: EsriPolyline, Parts: [][]orb.Point{g}}, true
 	case orb.MultiLineString:
-		parts := make([][]orb.Point, len(g))
-		for i, l := range g {
-			parts[i] = l
-		}
-		return Esri{Kind: EsriPolyline, Parts: parts}, true
+		return Esri{Kind: EsriPolyline, Parts: parts(g)}, true
 	case orb.Polygon:
 		return Esri{Kind: EsriPolygon, Parts: orient(g)}, true
 	case orb.MultiPolygon:
@@ -55,7 +53,8 @@ func ToEsri(g orb.Geometry) (Esri, bool) {
 	return Esri{}, false
 }
 
-func closeRing(r []orb.Point) []orb.Point {
+// CloseRing repeats a ring's first point at its end when it is not there already.
+func CloseRing(r []orb.Point) []orb.Point {
 	if len(r) > 0 && r[0] != r[len(r)-1] {
 		out := make([]orb.Point, len(r), len(r)+1)
 		copy(out, r)
@@ -64,7 +63,8 @@ func closeRing(r []orb.Point) []orb.Point {
 	return r
 }
 
-func clockwise(r []orb.Point) bool {
+// Clockwise is a ring's winding by the shoelace sum, as @terraformer/arcgis tests it.
+func Clockwise(r []orb.Point) bool {
 	total := 0.0
 	for i := 0; i < len(r)-1; i++ {
 		total += (r[i+1][0] - r[i][0]) * (r[i+1][1] + r[i][1])
@@ -73,10 +73,8 @@ func clockwise(r []orb.Point) bool {
 }
 
 func reversed(r []orb.Point) []orb.Point {
-	out := make([]orb.Point, len(r))
-	for i, p := range r {
-		out[len(r)-1-i] = p
-	}
+	out := slices.Clone(r)
+	slices.Reverse(out)
 	return out
 }
 
@@ -84,18 +82,18 @@ func orient(p orb.Polygon) [][]orb.Point {
 	if len(p) == 0 {
 		return nil
 	}
-	outer := closeRing(p[0])
+	outer := CloseRing(p[0])
 	if len(outer) < 4 {
 		return [][]orb.Point{}
 	}
-	if !clockwise(outer) {
+	if !Clockwise(outer) {
 		outer = reversed(outer)
 	}
 	out := [][]orb.Point{outer}
 	for _, h := range p[1:] {
-		hole := closeRing(h)
+		hole := CloseRing(h)
 		if len(hole) >= 4 {
-			if clockwise(hole) {
+			if Clockwise(hole) {
 				hole = reversed(hole)
 			}
 			out = append(out, hole)
@@ -106,88 +104,36 @@ func orient(p orb.Polygon) [][]orb.Point {
 
 // AppendJSON writes the geometry as Esri JSON (without a spatialReference, as winnow leaves it).
 func (e Esri) AppendJSON(buf []byte) []byte {
-	if e.Kind == EsriPoint {
+	switch e.Kind {
+	case EsriPoint:
 		buf = append(buf, `{"x":`...)
 		buf = jsonx.AppendNumber(buf, e.X)
 		buf = append(buf, `,"y":`...)
 		buf = jsonx.AppendNumber(buf, e.Y)
 		return append(buf, '}')
-	}
-	switch e.Kind {
 	case EsriMultipoint:
-		buf = append(buf, `{"points":`...)
-		buf = appendPoints(buf, e.Parts[0])
-		return append(buf, '}')
+		var pts []orb.Point
+		if len(e.Parts) > 0 {
+			pts = e.Parts[0]
+		}
+		return append(appendPoints(append(buf, `{"points":`...), pts), '}')
 	case EsriPolyline:
 		buf = append(buf, `{"paths":`...)
 	default:
 		buf = append(buf, `{"rings":`...)
 	}
-	buf = append(buf, '[')
-	for i, part := range e.Parts {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = appendPoints(buf, part)
-	}
-	return append(buf, "]}"...)
+	return append(jsonx.AppendArray(buf, e.Parts, appendPoints[[]orb.Point]), '}')
 }
 
-func appendPoints(buf []byte, ps []orb.Point) []byte {
+func appendPoints[S ~[]orb.Point](buf []byte, ps S) []byte {
 	buf = append(buf, '[')
 	for i, p := range ps {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = append(buf, '[')
-		buf = jsonx.AppendNumber(buf, p[0])
-		buf = append(buf, ',')
-		buf = jsonx.AppendNumber(buf, p[1])
-		buf = append(buf, ']')
+		buf = appendPoint(buf, p)
 	}
 	return append(buf, ']')
-}
-
-// GeoJSON writes a geometry as a GeoJSON object.
-type GeoJSON struct{ G orb.Geometry }
-
-// AppendJSON implements jsonx.Appender.
-func (g GeoJSON) AppendJSON(buf []byte) []byte {
-	switch x := g.G.(type) {
-	case orb.Point:
-		buf = append(buf, `{"type":"Point","coordinates":`...)
-		buf = appendPoint(buf, x)
-	case orb.MultiPoint:
-		buf = append(buf, `{"type":"MultiPoint","coordinates":`...)
-		buf = appendPoints(buf, x)
-	case orb.LineString:
-		buf = append(buf, `{"type":"LineString","coordinates":`...)
-		buf = appendPoints(buf, x)
-	case orb.MultiLineString:
-		buf = append(buf, `{"type":"MultiLineString","coordinates":[`...)
-		for i, l := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = appendPoints(buf, l)
-		}
-		buf = append(buf, ']')
-	case orb.Polygon:
-		buf = append(buf, `{"type":"Polygon","coordinates":`...)
-		buf = appendRings(buf, x)
-	case orb.MultiPolygon:
-		buf = append(buf, `{"type":"MultiPolygon","coordinates":[`...)
-		for i, p := range x {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			buf = appendRings(buf, p)
-		}
-		buf = append(buf, ']')
-	default:
-		return append(buf, "null"...)
-	}
-	return append(buf, '}')
 }
 
 func appendPoint(buf []byte, p orb.Point) []byte {
@@ -199,12 +145,29 @@ func appendPoint(buf []byte, p orb.Point) []byte {
 }
 
 func appendRings(buf []byte, p orb.Polygon) []byte {
-	buf = append(buf, '[')
-	for i, r := range p {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = appendPoints(buf, r)
+	return jsonx.AppendArray(buf, p, appendPoints[orb.Ring])
+}
+
+// GeoJSON writes a geometry as a GeoJSON object.
+type GeoJSON struct{ G orb.Geometry }
+
+// AppendJSON implements jsonx.Appender.
+func (g GeoJSON) AppendJSON(buf []byte) []byte {
+	switch x := g.G.(type) {
+	case orb.Point:
+		buf = appendPoint(append(buf, `{"type":"Point","coordinates":`...), x)
+	case orb.MultiPoint:
+		buf = appendPoints(append(buf, `{"type":"MultiPoint","coordinates":`...), x)
+	case orb.LineString:
+		buf = appendPoints(append(buf, `{"type":"LineString","coordinates":`...), x)
+	case orb.MultiLineString:
+		buf = jsonx.AppendArray(append(buf, `{"type":"MultiLineString","coordinates":`...), x, appendPoints[orb.LineString])
+	case orb.Polygon:
+		buf = appendRings(append(buf, `{"type":"Polygon","coordinates":`...), x)
+	case orb.MultiPolygon:
+		buf = jsonx.AppendArray(append(buf, `{"type":"MultiPolygon","coordinates":`...), x, appendRings)
+	default:
+		return append(buf, "null"...)
 	}
-	return append(buf, ']')
+	return append(buf, '}')
 }

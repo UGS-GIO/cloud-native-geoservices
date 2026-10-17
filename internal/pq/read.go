@@ -58,8 +58,11 @@ type run struct {
 	v     *Values
 }
 
-// rgSpan is the rows[from:to] that fall in row group g.
-type rgSpan struct{ g, from, to int }
+// rgSpan is the rows[from:to] that fall in row group g, and those rows numbered within it.
+type rgSpan struct {
+	g, from, to int
+	rel         []int64
+}
 
 // Cell locates one value.
 type Cell struct {
@@ -90,25 +93,29 @@ func (l *Layer) groupOf(row int64) int {
 	return sort.Search(len(l.Groups), func(i int) bool { return l.Groups[i].Start > row }) - 1
 }
 
-// Read returns the values of cols at the sorted row numbers rows, decoding each run once.
-func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, error) {
-	out := &Rows{Cols: cols, Cells: make([][]Cell, len(cols))}
-	if len(rows) == 0 {
-		return out, nil
-	}
+// spans splits the sorted rows by row group.
+func (l *Layer) spans(rows []int64) ([]rgSpan, error) {
 	var spans []rgSpan
 	for i := 0; i < len(rows); {
 		if rows[i] < 0 || rows[i] >= l.Rows {
 			return nil, fmt.Errorf("row %d out of range", rows[i])
 		}
-		g := l.groupOf(rows[i])
-		end := l.Groups[g].Start + l.Groups[g].Rows
-		j := i
-		for j < len(rows) && rows[j] < end {
-			j++
+		sp := rgSpan{g: l.groupOf(rows[i]), from: i}
+		for start := l.Groups[sp.g].Start; i < len(rows) && rows[i] < start+l.Groups[sp.g].Rows; i++ {
+			sp.rel = append(sp.rel, rows[i]-start)
 		}
-		spans = append(spans, rgSpan{g, i, j})
-		i = j
+		sp.to = i
+		spans = append(spans, sp)
+	}
+	return spans, nil
+}
+
+// Read returns the values of cols at the sorted row numbers rows, decoding each run once.
+func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, error) {
+	out := &Rows{Cols: cols, Cells: make([][]Cell, len(cols))}
+	spans, err := l.spans(rows)
+	if err != nil || len(rows) == 0 {
+		return out, err
 	}
 	leaves := make([]leaf, len(cols))
 	for c, name := range cols {
@@ -126,13 +133,8 @@ func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, e
 	for c, lf := range leaves {
 		runs[c] = make([][]run, len(spans))
 		for s, sp := range spans {
-			first := l.Groups[sp.g].Start
-			rel := make([]int64, sp.to-sp.from)
-			for i := range rel {
-				rel[i] = rows[sp.from+i] - first
-			}
 			g.Go(func() (err error) {
-				runs[c][s], err = l.runs(gctx, lf, sp.g, rel)
+				runs[c][s], err = l.runs(gctx, lf, sp.g, sp.rel)
 				return err
 			})
 		}

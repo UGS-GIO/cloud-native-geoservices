@@ -1,15 +1,17 @@
 package query
 
 import (
-	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/project"
 
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/esri"
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
+	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/js"
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
 	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/where"
 )
@@ -38,22 +40,9 @@ func (s SpatialRef) AppendJSON(buf []byte) []byte {
 	return jsonx.Append(buf, jsonx.Obj{{K: "wkid", V: s.Wkid}, {K: "latestWkid", V: s.Latest}})
 }
 
-// outputSR is Koop's normalization of the response spatial reference.
-func outputSR(id int) SpatialRef {
-	switch id {
-	case 102100:
-		return SpatialRef{102100, 3857}
-	case 3857:
-		return SpatialRef{3857, 3857}
-	case 102113:
-		return SpatialRef{102113, 3785}
-	case 3785:
-		return SpatialRef{3785, 3785}
-	case 4269:
-		return SpatialRef{4269, 4269}
-	}
-	return SpatialRef{4326, 4326}
-}
+// outputSRs is Koop's normalization of the response spatial reference; anything else is 4326.
+var outputSRs = map[int]SpatialRef{102100: {102100, 3857}, 3857: {3857, 3857}, 102113: {102113, 3785},
+	3785: {3785, 3785}, 4269: {4269, 4269}}
 
 var selectAll = regexp.MustCompile(`1\s*=\s*1`)
 
@@ -89,7 +78,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 		return &Response{JSON: jsonx.Obj{{K: "extent", V: c.Extent}}}, nil
 	}
 	if f == "pbf" && p.True("returnExtentOnly") {
-		return nil, bad("Bad Request")
+		return nil, Bad("Bad Request")
 	}
 
 	w, err := newWinnow(c, p)
@@ -179,7 +168,7 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if v, ok := p["where"]; ok {
 		s, isStr := v.(string)
 		if !isStr {
-			return nil, bad((&where.Error{Where: "must be a string if defined"}).Error())
+			return nil, Bad((&where.Error{Where: "must be a string if defined"}).Error())
 		}
 		whereStr = s
 	}
@@ -187,7 +176,7 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if !selectAll.MatchString(whereStr) && strings.TrimSpace(whereStr) != "" {
 		e, err := where.Parse(whereStr, w.resolve)
 		if err != nil {
-			return nil, bad(err.Error())
+			return nil, Bad(err.Error())
 		}
 		w.where = e
 	}
@@ -245,7 +234,10 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if v, ok := p["outSR"]; ok {
 		outID, _ = wkid(v)
 	}
-	w.outSR = outputSR(outID)
+	w.outSR = outputSRs[outID]
+	if w.outSR.Wkid == 0 {
+		w.outSR = SpatialRef{4326, 4326}
+	}
 	w.toMercator = geom.Mercator[outID] && outID != 0
 	if b, ok := p["returnGeometry"].(bool); ok && !b {
 		w.geometry = false
@@ -253,7 +245,7 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if n, ok := p.Number("geometryPrecision"); ok && n != 0 {
 		// Koop's Number.prototype.toFixed throws outside 0..100; past it, formatting is unbounded work.
 		if n < 0 || n > 100 {
-			return nil, bad("geometryPrecision must be between 0 and 100")
+			return nil, Bad("geometryPrecision must be between 0 and 100")
 		}
 		v := int(n)
 		w.precision = &v
@@ -297,14 +289,8 @@ func (w *winnow) idMatch(ft *Feature) bool {
 	if w.idIndex < 0 {
 		return false
 	}
-	v := ft.Props[w.idIndex]
-	var f float64
-	switch x := v.(type) {
-	case int64:
-		f = float64(x)
-	case float64:
-		f = x
-	default:
+	f, ok := js.AsNumber(ft.Props[w.idIndex])
+	if !ok {
 		return false
 	}
 	for _, id := range w.ids {
@@ -320,12 +306,16 @@ func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
 	if g == nil {
 		return nil
 	}
+	// g may be a cached shape: project.Geometry works in place, so it gets one copy.
+	if w.toMercator || w.precision != nil {
+		g = orb.Clone(g)
+	}
 	if w.toMercator {
-		g = geom.Map(g, geom.ToMercator)
+		g = project.Geometry(g, geom.ToMercator)
 	}
 	if w.precision != nil {
 		d := *w.precision
-		g = geom.Map(g, func(p orb.Point) orb.Point { return orb.Point{toFixed(p[0], d), toFixed(p[1], d)} })
+		g = project.Geometry(g, func(p orb.Point) orb.Point { return orb.Point{toFixed(p[0], d), toFixed(p[1], d)} })
 	}
 	return g
 }
@@ -366,12 +356,12 @@ func (w *winnow) esriFeatures(idx []int) ([]EsriFeature, bool) {
 		out = append(out, ef)
 	}
 	if w.distinct {
-		out = distinctFeatures(out)
+		out = distinct(out, EsriFeature.AppendJSON)
 	}
-	return w.page(out)
+	return page(w, out)
 }
 
-func (w *winnow) page(out []EsriFeature) ([]EsriFeature, bool) {
+func page[T any](w *winnow, out []T) ([]T, bool) {
 	if w.limit == 0 {
 		return out, false
 	}
@@ -384,19 +374,18 @@ func (w *winnow) page(out []EsriFeature) ([]EsriFeature, bool) {
 	return out, false
 }
 
-func distinctFeatures(fs []EsriFeature) []EsriFeature {
-	seen := map[string]int{}
-	var out []EsriFeature
-	for _, f := range fs {
-		key := string(f.AppendJSON(nil))
-		if i, ok := seen[key]; ok {
-			out[i] = f
-			continue
+// distinct drops the items whose JSON an earlier item already has.
+func distinct[T any](xs []T, appendJSON func(T, []byte) []byte) []T {
+	seen := map[string]bool{}
+	var buf []byte
+	return slices.DeleteFunc(xs, func(x T) bool {
+		buf = appendJSON(x, buf[:0])
+		if seen[string(buf)] {
+			return true
 		}
-		seen[key] = len(out)
-		out = append(out, f)
-	}
-	return out
+		seen[string(buf)] = true
+		return false
+	})
 }
 
 // geojson is the f=geojson feature list.
@@ -421,46 +410,33 @@ func (w *winnow) geojson(idx []int) []any {
 		out = append(out, o)
 	}
 	if w.distinct {
-		seen := map[string]bool{}
-		kept := out[:0]
-		for _, o := range out {
-			k := string(jsonx.Marshal(o))
-			if !seen[k] {
-				seen[k] = true
-				kept = append(kept, o)
-			}
-		}
-		out = kept
+		out = distinct(out, func(o any, b []byte) []byte { return jsonx.Append(b, o) })
 	}
-	if w.limit != 0 {
-		from := min(len(out), w.offset)
-		to := min(len(out), w.offset+w.limit)
-		out = out[from:to]
-		if len(out) == w.limit {
-			out = out[:len(out)-1]
-		}
-	}
+	out, _ = page(w, out)
 	return out
 }
 
 // extentOf is esri-extent over output features.
 func (w *winnow) extentOf(fs []EsriFeature) jsonx.Obj {
-	x0, y0, x1, y1 := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
+	b := geom.Bounds(nil)
 	for _, f := range fs {
 		if f.Geom == nil {
 			continue
 		}
 		if f.Geom.Kind == geom.EsriPoint {
-			x0, x1 = math.Min(x0, f.Geom.X), math.Max(x1, f.Geom.X)
-			y0, y1 = math.Min(y0, f.Geom.Y), math.Max(y1, f.Geom.Y)
+			b = b.Extend(orb.Point{f.Geom.X, f.Geom.Y})
 		}
 		for _, part := range f.Geom.Parts {
 			for _, pt := range part {
-				x0, x1 = math.Min(x0, pt[0]), math.Max(x1, pt[0])
-				y0, y1 = math.Min(y0, pt[1]), math.Max(y1, pt[1])
+				b = b.Extend(pt)
 			}
 		}
 	}
-	return jsonx.Obj{{K: "xmin", V: x0}, {K: "ymin", V: y0}, {K: "xmax", V: x1}, {K: "ymax", V: y1},
-		{K: "spatialReference", V: jsonx.Obj{{K: "wkid", V: w.outSR.Wkid}}}}
+	return Extent(jsonx.Obj{{K: "wkid", V: w.outSR.Wkid}}, b.Min[0], b.Min[1], b.Max[0], b.Max[1])
+}
+
+// Extent is an Esri envelope in spatial reference sr.
+func Extent(sr jsonx.Obj, xmin, ymin, xmax, ymax float64) jsonx.Obj {
+	return jsonx.Obj{{K: "xmin", V: xmin}, {K: "ymin", V: ymin}, {K: "xmax", V: xmax}, {K: "ymax", V: ymax},
+		{K: "spatialReference", V: sr}}
 }

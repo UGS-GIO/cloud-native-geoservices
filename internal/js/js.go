@@ -120,18 +120,20 @@ func StrictEqual(a, b any) bool {
 		bb, ok := b.(bool)
 		return ok && ba == bb
 	}
-	if !isNumber(a) || !isNumber(b) {
-		return false
-	}
-	return Number(a) == Number(b)
+	x, ok1 := AsNumber(a)
+	y, ok2 := AsNumber(b)
+	return ok1 && ok2 && x == y
 }
 
-func isNumber(v any) bool {
-	switch v.(type) {
-	case int64, float64:
-		return true
+// AsNumber is v when it is a number.
+func AsNumber(v any) (float64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return float64(x), true
+	case float64:
+		return x, true
 	}
-	return false
+	return 0, false
 }
 
 // LooseEqual is a == b for non-null values.

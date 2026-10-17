@@ -202,15 +202,16 @@ func (l *Layer) readLayout(ctx context.Context, lf leaf, g int) (*layout, error)
 			return nil, fmt.Errorf("column %d row group %d: page header at %d: %w", lf.index, g, start+off, err)
 		}
 		size := int64(r.BytesRead()) + int64(h.CompressedPageSize)
+		n := int64(-1)
 		switch {
 		case h.Type == format.DictionaryPage:
 			lay.dict = [2]int64{start + off, start + off + size}
-		case h.DataPageHeader.Valid:
-			n := int64(h.DataPageHeader.V.NumValues) // a flat column: one value per row
-			lay.pages = append(lay.pages, pageLoc{start + off, size, row, n, int64(h.UncompressedPageSize)})
-			row += n
 		case h.DataPageHeaderV2.Valid:
-			n := int64(h.DataPageHeaderV2.V.NumRows)
+			n = int64(h.DataPageHeaderV2.V.NumRows)
+		case h.DataPageHeader.Valid:
+			n = int64(h.DataPageHeader.V.NumValues) // a flat column: one value per row
+		}
+		if n >= 0 {
 			lay.pages = append(lay.pages, pageLoc{start + off, size, row, n, int64(h.UncompressedPageSize)})
 			row += n
 		}
