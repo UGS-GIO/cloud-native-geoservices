@@ -80,6 +80,12 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	if err != nil {
 		return "", err
 	}
+	// A small-scale query reads an overview next: open it now rather than after the data file.
+	for _, a := range item.Assets {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
+			go pr.Open(context.WithoutCancel(ctx), a.Href)
+		}
+	}
 	var layer *pq.Layer
 	var d *catalog.Drawing
 	g, gctx := errgroup.WithContext(ctx)
