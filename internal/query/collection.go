@@ -3,8 +3,8 @@ package query
 import (
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/esri"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 )
 
 // Feature is one provider feature: its property values (aligned with Collection.Props) and its

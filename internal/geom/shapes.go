@@ -6,7 +6,7 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/lru"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/lru"
 )
 
 // Shapes caches simplified geometries per file and zoom step, by feature id, least recently used

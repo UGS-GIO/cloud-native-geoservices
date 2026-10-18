@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 )
 
 //go:embed defaults/server.json

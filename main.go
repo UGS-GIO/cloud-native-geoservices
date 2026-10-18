@@ -21,11 +21,11 @@ import (
 	"golang.org/x/net/netutil"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/catalog"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/provider"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/server"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/server"
 )
 
 func env(key, def string) string {

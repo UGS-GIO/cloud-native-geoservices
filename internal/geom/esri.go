@@ -5,7 +5,7 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 )
 
 // EsriKind is an Esri geometry type.

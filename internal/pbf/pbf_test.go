@@ -6,10 +6,10 @@ import (
 	"github.com/paulmach/orb"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/esri"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/query"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
 )
 
 // fields walks one message, returning its fields by number (repeated fields in order).

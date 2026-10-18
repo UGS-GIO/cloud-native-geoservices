@@ -3,7 +3,7 @@ package query
 import (
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 )
 
 // Spatial is a request's geometry filter: the query geometry, prepared, and its spatialRel.

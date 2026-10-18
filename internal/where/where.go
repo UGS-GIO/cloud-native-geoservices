@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
 )
 
 // Expr is a compiled where clause.

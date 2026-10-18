@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/js"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 )
 
 // Kind is what a request needs from the file.

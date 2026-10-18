@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/catalog"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/provider"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
 )
 
 // fixture serves the testdata topics from local GeoParquet files.

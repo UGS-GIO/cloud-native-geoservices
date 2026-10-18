@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/catalog"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/query"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
 )
 
 func fixture(t *testing.T) *Provider {

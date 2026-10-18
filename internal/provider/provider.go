@@ -18,15 +18,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/catalog"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/esri"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/js"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/jsonx"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/plan"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/pq"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/query"
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/remote"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/plan"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/remote"
 )
 
 const unlimited = int64(1) << 50

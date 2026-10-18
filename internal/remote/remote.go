@@ -25,7 +25,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/lru"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/lru"
 )
 
 const (

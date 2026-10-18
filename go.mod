@@ -1,4 +1,4 @@
-module github.com/UGS-GIO/ugs-warehouse/geoservices
+module github.com/UGS-GIO/geoparquet-featureserver
 
 go 1.26.3
 

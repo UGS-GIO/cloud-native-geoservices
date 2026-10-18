@@ -4,7 +4,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
 )
 
 // sorted orders feature indexes by orderByFields, as alasql's ORDER BY compares: a falsy value

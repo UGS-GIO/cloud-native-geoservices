@@ -8,7 +8,7 @@ import (
 	"github.com/paulmach/orb/planar"
 	"github.com/paulmach/orb/project"
 
-	"github.com/UGS-GIO/ugs-warehouse/geoservices/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 )
 
 // filterGeometry reads the request's `geometry` (Esri JSON, or "xmin,ymin,xmax,ymax" / "x,y")
