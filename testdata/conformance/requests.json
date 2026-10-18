@@ -75,6 +75,8 @@
 {"name": "pbf-ids", "params": {"f": "pbf", "where": "{where}", "returnIdsOnly": "true"}},
 {"name": "pbf-tile", "params": {"f": "pbf", "geometry": "{tilegeom}", "geometryType": "esriGeometryEnvelope", "inSR": "102100", "spatialRel": "esriSpatialRelIntersects", "where": "1=1", "outFields": "{oid}", "outSR": "102100", "orderByFields": "{oid}", "resultOffset": "0", "resultRecordCount": "8000", "resultType": "tile", "maxRecordCountFactor": "4", "quantizationParameters": "{tilequant}"}},
 {"name": "error-where-field", "params": {"f": "json", "where": "nosuchfield = 1", "returnCountOnly": "true"}},
+{"name": "error-no-where", "params": {"f": "json", "returnCountOnly": "true"}},
+{"name": "error-blank-where", "params": {"f": "json", "where": " ", "returnIdsOnly": "true"}},
 {"name": "error-where-syntax", "params": {"f": "json", "where": "{num} >", "returnCountOnly": "true"}},
 {"name": "error-outfields", "params": {"f": "json", "where": "1=1", "outFields": "nosuchfield", "resultRecordCount": "1"}},
 {"name": "error-orderby", "params": {"f": "json", "where": "1=1", "orderByFields": "nosuchfield", "resultRecordCount": "1", "outFields": "{oid}"}},

@@ -57,6 +57,10 @@ func (p Params) True(k string) bool { v, ok := p[k].(bool); return ok && v }
 // String is the parameter when it is a string.
 func (p Params) String(k string) (string, bool) { s, ok := p[k].(string); return s, ok }
 
+func (p Params) has(keys ...string) bool {
+	return slices.ContainsFunc(keys, func(k string) bool { _, ok := p[k]; return ok })
+}
+
 // Number is the parameter when it is a number.
 func (p Params) Number(k string) (float64, bool) { f, ok := p[k].(float64); return f, ok }
 
@@ -103,6 +107,9 @@ func (p Params) Validate() error {
 			m := `"` + c[0] + `" must be a ` + c[1]
 			return Bad(m, m)
 		}
+	}
+	if w, _ := p.String("where"); strings.TrimSpace(w) == "" && !p.has("objectIds", "geometry", "outStatistics", "time") {
+		return Bad("No where clause specified")
 	}
 	if v, ok := p["objectIds"]; ok {
 		if f, num := v.(float64); typeOf(v) != "string" && !(num && isInt(f)) {

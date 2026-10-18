@@ -44,7 +44,7 @@ func run(t *testing.T, q string) string {
 func TestRun(t *testing.T) {
 	tests := []struct{ q, want string }{
 		{"where=kind='Lake'&returnCountOnly=true", `{"count":2}`},
-		{"returnIdsOnly=true&orderByFields=acres DESC", `{"objectIdFieldName":"feature_id","objectIds":[1,3,2]}`},
+		{"where=1=1&returnIdsOnly=true&orderByFields=acres DESC", `{"objectIdFieldName":"feature_id","objectIds":[1,3,2]}`},
 		{"outStatistics=" + url.QueryEscape(`[{"statisticType":"sum","onStatisticField":"acres","outStatisticFieldName":"s"}]`) + "&groupByFieldsForStatistics=kind",
 			`{"displayFieldName":"","fields":[{"name":"s","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"s","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"kind":"Pond"}}]}`},
 		{"geometry=-111.5,40.1,-111.4,40.2&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[1]}`},
@@ -56,9 +56,12 @@ func TestRun(t *testing.T) {
 		{"geometry=-111.9,40.8,-111.8,40.9&spatialRel=esriSpatialRelTouches", "error: 'spatialRel' parameter is invalid"},
 		{"resultRecordCount=abc", `error: "resultRecordCount" must be a number`},
 		{"f=xml", "error: Invalid format"},
-		{"outSR=2263", "error: Unsupported spatial reference: 2263"},
+		{"returnCountOnly=true", "error: No where clause specified"},
+		{"where=%20&returnCountOnly=true", "error: No where clause specified"},
+		{"objectIds=1&returnCountOnly=true", `{"count":1}`},
+		{"where=1=1&outSR=2263", "error: Unsupported spatial reference: 2263"},
 		{"where=nope ===", `error: Invalid "where" parameter: nope ===`},
-		{"outFields=kind&returnDistinctValues=true&returnGeometry=false&resultRecordCount=1",
+		{"where=1=1&outFields=kind&returnDistinctValues=true&returnGeometry=false&resultRecordCount=1",
 			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","hasZ":false,"hasM":false,"spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"kind":"Lake"}}],"exceededTransferLimit":true,"geometryType":"esriGeometryPolygon"}`},
 	}
 	for _, tt := range tests {

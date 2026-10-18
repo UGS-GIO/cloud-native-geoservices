@@ -124,7 +124,8 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 
 - `where`: SQL subset (comparisons, `AND`/`OR`/`NOT`, `IN`, `LIKE`, `IS NULL`, `BETWEEN`,
   `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals). Field names match case-insensitively, and
-  strings compare and sort ignoring case, as on ArcGIS Online.
+  strings compare and sort ignoring case, as on ArcGIS Online. As there, a query needs a `where`
+  unless it has `objectIds`, `geometry` or `outStatistics`.
 - `objectIds`, `outFields`, `returnGeometry`, `orderByFields`, `resultOffset`,
   `resultRecordCount`, `resultType=tile`, `maxAllowableOffset`, `geometryPrecision`.
 - `geometry` (envelope, point, multipoint, polyline, polygon), `geometryType`, `inSR`,
