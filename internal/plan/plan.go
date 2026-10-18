@@ -230,8 +230,11 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	if !ok {
 		outFields = "*"
 	}
-	if p.Stream {
-		outFields = "" // a count or ids needs only feature_id
+	// A count or ids needs only feature_id; statistics only the fields they name, which the
+	// mentions below find unless a field name holds a character they strip.
+	plain := !slices.ContainsFunc(layer.Columns, func(c pq.Column) bool { return nonWord.MatchString(c.Name) })
+	if p.Stream || (stats && !ok && plain) {
+		outFields = ""
 	}
 	var out []string
 	for _, f := range strings.Split(outFields, ",") {
