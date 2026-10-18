@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"math"
 	"slices"
 
 	"golang.org/x/sync/errgroup"
@@ -89,35 +90,66 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 	return rows, nil
 }
 
-// inBox is the rows whose bbox columns intersect box, from row groups whose statistics do. The
-// covering columns are read whole per row group and scanned in place.
+// inBox is the rows whose bbox columns intersect box, from row groups whose statistics meet it
+// and, where the file has a page index, pages whose bounds do.
 func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 	var groups []int
+	var index [][2]int64
 	for g, gr := range l.Groups {
-		if overlaps(gr, box) {
-			groups = append(groups, g)
+		if !overlaps(gr, box) {
+			continue
+		}
+		groups = append(groups, g)
+		for _, lf := range l.bboxLeaves() {
+			cc := l.chunkMeta(lf, g)
+			if cc.ColumnIndexOffset > 0 && cc.OffsetIndexOffset > 0 {
+				index = append(index, [2]int64{cc.ColumnIndexOffset, cc.ColumnIndexOffset + int64(cc.ColumnIndexLength)},
+					[2]int64{cc.OffsetIndexOffset, cc.OffsetIndexOffset + int64(cc.OffsetIndexLength)})
+			}
 		}
 	}
-	if err := l.prefetch(ctx, l.bboxLeaves(), groups); err != nil {
+	// Usually inside the footer read already; else one request for every group's.
+	if err := l.file.Prefetch(ctx, index); err != nil {
 		return nil, err
 	}
-	hits := make([][]int64, len(groups))
+	var spans []rgSpan
+	for _, g := range groups {
+		rel, err := l.candidates(ctx, g, box)
+		if err != nil {
+			return nil, err
+		}
+		if rel == nil || len(rel) > 0 {
+			spans = append(spans, rgSpan{g: g, rel: rel})
+		}
+	}
+	if err := l.prefetch(ctx, l.bboxLeaves(), spans); err != nil {
+		return nil, err
+	}
+	hits := make([][]int64, len(spans))
 	eg, ectx := errgroup.WithContext(ctx)
-	for k, g := range groups {
+	for k, sp := range spans {
 		eg.Go(func() error {
-			var cols [4]*Values
+			var cols [4]cursor
 			for c, name := range BBox {
-				rs, err := l.runs(ectx, l.leaves[name], g, nil)
+				rs, err := l.runs(ectx, l.leaves[name], sp.g, sp.rel)
 				if err != nil {
 					return err
 				}
-				cols[c] = rs[0].v
+				cols[c].runs = rs
 			}
-			start := l.Groups[g].Start
-			for i := range int(l.Groups[g].Rows) {
-				if at(cols[2], i) >= box[0] && at(cols[0], i) <= box[2] && at(cols[3], i) >= box[1] && at(cols[1], i) <= box[3] {
-					hits[k] = append(hits[k], start+int64(i))
+			start := l.Groups[sp.g].Start
+			test := func(i int64) {
+				if cols[2].at(i) >= box[0] && cols[0].at(i) <= box[2] && cols[3].at(i) >= box[1] && cols[1].at(i) <= box[3] {
+					hits[k] = append(hits[k], start+i)
 				}
+			}
+			if sp.rel == nil {
+				for i := range l.Groups[sp.g].Rows {
+					test(i)
+				}
+			}
+			for _, i := range sp.rel {
+				test(i)
 			}
 			return nil
 		})
@@ -126,6 +158,82 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 		return nil, err
 	}
 	return slices.Concat(hits...), nil
+}
+
+// candidates is the sorted rows of row group g in a page of every bbox column whose bounds could
+// meet box, a null counting as 0 as at reads it; nil when the page index rules out no row.
+func (l *Layer) candidates(ctx context.Context, g int, box *[4]float64) ([]int64, error) {
+	rows := l.Groups[g].Rows
+	keep := [][2]int64{{0, rows}}
+	for c, lf := range l.bboxLeaves() {
+		if l.chunkMeta(lf, g).OffsetIndexOffset == 0 {
+			return nil, nil
+		}
+		ci, err := l.columnIndex(ctx, lf, g)
+		if err != nil || ci == nil {
+			return nil, err
+		}
+		lay, err := l.layout(ctx, lf, g)
+		if err != nil || len(lay.pages) != len(ci.NullPages) {
+			return nil, err
+		}
+		t := l.chunkMeta(lf, g).MetaData.Type
+		var pass [][2]int64
+		for p, pg := range lay.pages {
+			// The xmin and ymin columns must reach down to the box's max; xmax and ymax up to its min.
+			meets := func(v float64) bool { return v <= box[c+2] }
+			bound := ci.MinValues[p]
+			if c >= 2 {
+				meets, bound = func(v float64) bool { return v >= box[c-2] }, ci.MaxValues[p]
+			}
+			nulls := ci.NullPages[p] || len(ci.NullCounts) == 0 || ci.NullCounts[p] > 0
+			v := number(t, bound)
+			if (nulls && meets(0)) || (!ci.NullPages[p] && (math.IsNaN(v) || meets(v))) {
+				pass = append(pass, [2]int64{pg.first, pg.first + pg.rows})
+			}
+		}
+		keep = intersect(keep, pass)
+	}
+	if len(keep) == 1 && keep[0] == [2]int64{0, rows} {
+		return nil, nil
+	}
+	out := []int64{}
+	for _, r := range keep {
+		for i := r[0]; i < r[1]; i++ {
+			out = append(out, i)
+		}
+	}
+	return out, nil
+}
+
+// intersect is the rows in both sorted lists of [start, end) ranges.
+func intersect(a, b [][2]int64) [][2]int64 {
+	var out [][2]int64
+	for i, j := 0, 0; i < len(a) && j < len(b); {
+		if lo, hi := max(a[i][0], b[j][0]), min(a[i][1], b[j][1]); lo < hi {
+			out = append(out, [2]int64{lo, hi})
+		}
+		if a[i][1] < b[j][1] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return out
+}
+
+// cursor reads a column's runs at increasing rows.
+type cursor struct {
+	runs []run
+	k    int
+}
+
+func (c *cursor) at(row int64) float64 {
+	for c.k+1 < len(c.runs) && c.runs[c.k+1].first <= row {
+		c.k++
+	}
+	r := c.runs[c.k]
+	return at(r.v, int(row-r.first))
 }
 
 func (l *Layer) bboxLeaves() []leaf {
@@ -145,13 +253,13 @@ func (l *Layer) Warm(ctx context.Context, cols []string, box *[4]float64) error 
 			leaves = append(leaves, lf)
 		}
 	}
-	var groups []int
+	var spans []rgSpan
 	for g, gr := range l.Groups {
 		if box == nil || overlaps(gr, box) {
-			groups = append(groups, g)
+			spans = append(spans, rgSpan{g: g})
 		}
 	}
-	return l.prefetch(ctx, leaves, groups)
+	return l.prefetch(ctx, leaves, spans)
 }
 
 // at is value i of a numeric column; a null bound compares as 0, as it does in JavaScript.

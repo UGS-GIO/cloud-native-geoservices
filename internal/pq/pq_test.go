@@ -3,8 +3,13 @@ package pq
 import (
 	"context"
 	"math"
+	"math/rand/v2"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"github.com/parquet-go/parquet-go"
 )
 
 func open(t *testing.T, name string) *Layer {
@@ -78,3 +83,74 @@ func TestAppendKey(t *testing.T) {
 }
 
 func must(s string, _ bool) string { return s }
+
+// A file with small pages and some null bboxes: the page index prunes, and the rows stay those
+// every row group's statistics and a test of each row pick.
+func TestInBoxPages(t *testing.T) {
+	type row struct {
+		ID   int64    `parquet:"feature_id"`
+		Xmin *float64 `parquet:"bbox_xmin,optional"`
+		Ymin *float64 `parquet:"bbox_ymin,optional"`
+		Xmax *float64 `parquet:"bbox_xmax,optional"`
+		Ymax *float64 `parquet:"bbox_ymax,optional"`
+		Geom []byte   `parquet:"geom"`
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	rows := make([]row, 5000)
+	for i := range rows {
+		rows[i].ID = int64(i + 1)
+		if rng.IntN(20) == 0 {
+			continue
+		}
+		// Sorted along x, as a Hilbert order keeps neighbours together.
+		x, y := -10+20*float64(i)/5000, -10+20*rng.Float64()
+		rows[i].Xmin, rows[i].Ymin = &x, &y
+		x2, y2 := x+rng.Float64()/10, y+rng.Float64()/10
+		rows[i].Xmax, rows[i].Ymax = &x2, &y2
+	}
+	path := filepath.Join(t.TempDir(), "paged.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f, parquet.PageBufferSize(512), parquet.MaxRowsPerRowGroup(1500))
+	if _, err := w.Write(rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := func(p *float64) float64 {
+		if p == nil {
+			return 0
+		}
+		return *p
+	}
+	pruned := false
+	for _, box := range [][4]float64{{-3, -2, -2.5, 4}, {-1, -1, 1, 1}, {9.9, -10, 11, 10}, {-20, -20, 20, 20}, {5, 20, 6, 30}} {
+		got, err := l.Select(context.Background(), Selection{Box: &box})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var want []int64
+		for g, gr := range l.Groups {
+			for i := gr.Start; overlaps(gr, &box) && i < gr.Start+gr.Rows; i++ {
+				r := rows[i]
+				if v(r.Xmax) >= box[0] && v(r.Xmin) <= box[2] && v(r.Ymax) >= box[1] && v(r.Ymin) <= box[3] {
+					want = append(want, i)
+				}
+			}
+			if rel, _ := l.candidates(context.Background(), g, &box); rel != nil {
+				pruned = true
+			}
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("box %v: %d rows, want %d", box, len(got), len(want))
+		}
+	}
+	if !pruned {
+		t.Error("the page index pruned nothing")
+	}
+}

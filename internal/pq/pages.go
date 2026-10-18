@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -47,13 +48,38 @@ func pagesFor(firsts []int64, rel []int64) []int {
 	return pages
 }
 
-// runs returns decoded runs covering the sorted rows rel of one column chunk, in row order.
-// Small columns are decoded and cached a whole chunk at a time. Geometry is decoded and cached a
-// page at a time, so memory holds only the pages requests touch, and a later request fetches
-// just the pages it misses.
+// want is the pages of a chunk holding the sorted rows rel (nil: every row), or nil when the
+// chunk is read whole. Geometry is always read by page, so memory holds only the pages requests
+// touch. Other columns are read by page where the offset index places their pages and only some
+// are wanted, else whole, decoding a dictionary once.
+func (l *Layer) want(ctx context.Context, lf leaf, g int, rel []int64) ([]int, *layout, error) {
+	if lf.kind != KindBytes && (rel == nil || !lf.flat || l.chunkMeta(lf, g).OffsetIndexOffset == 0) {
+		return nil, nil, nil
+	}
+	lay, err := l.layout(ctx, lf, g)
+	if err != nil {
+		return nil, nil, err
+	}
+	pages := pagesFor(lay.firsts(), rel)
+	if lf.kind != KindBytes && len(pages) == len(lay.pages) {
+		return nil, lay, nil
+	}
+	return pages, lay, nil
+}
+
+// runs returns decoded runs covering the sorted rows rel (nil: every row) of one column chunk,
+// in row order, decoding the chunk whole or the pages want picks. A later request fetches just
+// the pages it misses.
 func (l *Layer) runs(ctx context.Context, lf leaf, g int, rel []int64) ([]run, error) {
 	ck := chunkKey{l.ID(), lf.index, g}
-	if lf.kind != KindBytes {
+	if v, ok := l.reader.decoded.Get(runKey{ck, -1}); ok {
+		return []run{{0, v}}, nil
+	}
+	pages, lay, err := l.want(ctx, lf, g, rel)
+	if err != nil {
+		return nil, err
+	}
+	if pages == nil && lf.kind != KindBytes {
 		got, err := l.decodeOnce(ctx, ck, []int{-1}, func() (map[int]*Values, error) {
 			v, err := l.decodeChunk(ctx, lf, g)
 			return map[int]*Values{-1: v}, err
@@ -63,11 +89,6 @@ func (l *Layer) runs(ctx context.Context, lf leaf, g int, rel []int64) ([]run, e
 		}
 		return []run{{0, got[-1]}}, nil
 	}
-	lay, err := l.layout(ctx, lf, g)
-	if err != nil {
-		return nil, err
-	}
-	pages := pagesFor(lay.firsts(), rel)
 	out := make([]run, len(pages))
 	var missing []int
 	for i, p := range pages {
@@ -245,18 +266,41 @@ func (l *Layer) acquire(ctx context.Context) (func(), error) {
 // maxPrefetch caps what one prefetch holds: past it, chunks are fetched as they are decoded.
 const maxPrefetch = 32 << 20
 
-// prefetch fetches the whole chunks of leaves in groups that are not decoded yet, joined into a
-// few requests, so decoding them reads from the cache.
-func (l *Layer) prefetch(ctx context.Context, leaves []leaf, groups []int) error {
+// prefetch fetches what reading leaves at the spans' rows needs and is not decoded yet (whole
+// chunks, or pages), joined into a few requests, so decoding reads from the cache. Geometry
+// whose pages only its chunk's page headers locate is left to the read.
+func (l *Layer) prefetch(ctx context.Context, leaves []leaf, spans []rgSpan) error {
 	var ranges [][2]int64
 	var total int64
+	add := func(r [2]int64) { ranges, total = append(ranges, r), total+r[1]-r[0] }
 	for _, lf := range leaves {
-		for _, g := range groups {
-			if _, ok := l.reader.decoded.Get(runKey{chunkKey{l.ID(), lf.index, g}, -1}); ok || lf.kind == KindBytes {
+		for _, sp := range spans {
+			ck := chunkKey{l.ID(), lf.index, sp.g}
+			if _, ok := l.reader.decoded.Get(runKey{ck, -1}); ok {
 				continue
 			}
-			start, end := l.chunkRange(lf, g)
-			ranges, total = append(ranges, [2]int64{start, end}), total+end-start
+			if lf.kind == KindBytes && l.chunkMeta(lf, sp.g).OffsetIndexOffset == 0 {
+				continue
+			}
+			pages, lay, err := l.want(ctx, lf, sp.g, sp.rel)
+			if err != nil {
+				return err
+			}
+			if pages == nil && lf.kind != KindBytes {
+				start, end := l.chunkRange(lf, sp.g)
+				add([2]int64{start, end})
+				continue
+			}
+			missing := false
+			for _, p := range pages {
+				if _, ok := l.reader.decoded.Get(runKey{ck, p}); !ok {
+					add([2]int64{lay.pages[p].off, lay.pages[p].off + lay.pages[p].size})
+					missing = true
+				}
+			}
+			if missing && lay.dict[1] > 0 {
+				add(lay.dict)
+			}
 		}
 	}
 	if len(ranges) < 2 || total > maxPrefetch {
@@ -403,4 +447,35 @@ func readValues(page parquet.Page, lf leaf, b *builder) error {
 			return err
 		}
 	}
+}
+
+// columnIndex is a chunk's column index, nil when it has none or it does not decode.
+func (l *Layer) columnIndex(ctx context.Context, lf leaf, g int) (*format.ColumnIndex, error) {
+	k := [2]int{g, lf.index}
+	l.mu.Lock()
+	ci, ok := l.indexes[k]
+	l.mu.Unlock()
+	if ok {
+		return ci, nil
+	}
+	cc := l.chunkMeta(lf, g)
+	if cc.ColumnIndexOffset == 0 {
+		return nil, nil
+	}
+	b, err := l.file.Range(ctx, cc.ColumnIndexOffset, cc.ColumnIndexOffset+int64(cc.ColumnIndexLength))
+	if err != nil {
+		return nil, err
+	}
+	// The library reads a column index whole-file or without its null counts; nulls matter here.
+	ci = new(format.ColumnIndex)
+	if thrift.Unmarshal(new(thrift.CompactProtocol), bytes.Clone(b), ci) != nil {
+		ci = nil
+	}
+	l.mu.Lock()
+	if l.indexes == nil {
+		l.indexes = map[[2]int]*format.ColumnIndex{}
+	}
+	l.indexes[k] = ci
+	l.mu.Unlock()
+	return ci, nil
 }
