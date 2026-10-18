@@ -1,7 +1,6 @@
 package geom
 
 import (
-	"iter"
 	"math"
 
 	"github.com/paulmach/orb"
@@ -57,55 +56,38 @@ func BoxToLonLat(x, y float64) (float64, float64) {
 // Bounds covers every coordinate of g, holes included (orb's Polygon.Bound uses the outer ring).
 func Bounds(g orb.Geometry) orb.Bound {
 	b := orb.Bound{Min: orb.Point{math.Inf(1), math.Inf(1)}, Max: orb.Point{math.Inf(-1), math.Inf(-1)}}
-	for p := range Points(g) {
-		b = b.Extend(p)
-	}
+	extend(&b, g)
 	return b
 }
 
-// Points yields every coordinate of g.
-func Points(g orb.Geometry) iter.Seq[orb.Point] {
-	return func(yield func(orb.Point) bool) {
-		var walk func(orb.Geometry) bool
-		run := func(ps []orb.Point) bool {
-			for _, p := range ps {
-				if !yield(p) {
-					return false
-				}
-			}
-			return true
+func extend(b *orb.Bound, g orb.Geometry) {
+	switch g := g.(type) {
+	case orb.Point:
+		extendRun(b, []orb.Point{g})
+	case orb.MultiPoint:
+		extendRun(b, g)
+	case orb.LineString:
+		extendRun(b, g)
+	case orb.Ring:
+		extendRun(b, g)
+	case orb.MultiLineString:
+		for _, l := range g {
+			extendRun(b, l)
 		}
-		walk = func(g orb.Geometry) bool {
-			switch g := g.(type) {
-			case orb.Point:
-				return yield(g)
-			case orb.MultiPoint:
-				return run(g)
-			case orb.LineString:
-				return run(g)
-			case orb.Ring:
-				return run(g)
-			case orb.MultiLineString:
-				for _, l := range g {
-					if !run(l) {
-						return false
-					}
-				}
-			case orb.Polygon:
-				for _, r := range g {
-					if !run(r) {
-						return false
-					}
-				}
-			case orb.MultiPolygon:
-				for _, p := range g {
-					if !walk(p) {
-						return false
-					}
-				}
-			}
-			return true
+	case orb.Polygon:
+		for _, r := range g {
+			extendRun(b, r)
 		}
-		walk(g)
+	case orb.MultiPolygon:
+		for _, p := range g {
+			extend(b, p)
+		}
+	}
+}
+
+func extendRun(b *orb.Bound, ps []orb.Point) {
+	for _, p := range ps {
+		b.Min[0], b.Max[0] = min(b.Min[0], p[0]), max(b.Max[0], p[0])
+		b.Min[1], b.Max[1] = min(b.Min[1], p[1]), max(b.Max[1], p[1])
 	}
 }

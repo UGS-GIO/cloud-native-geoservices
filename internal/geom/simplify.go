@@ -16,6 +16,7 @@ import (
 // tolerance and stands in as its bounding box, so the caller can thin overlapping specks.
 type Shape struct {
 	G     orb.Geometry
+	Bound orb.Bound // Bounds(G)
 	Speck bool
 }
 
@@ -323,7 +324,7 @@ func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
 	if err != nil {
 		return Shape{}, false, err
 	}
-	s := Shape{G: g}
+	s := Shape{G: g, Bound: Bounds(g)}
 	switch g.(type) {
 	case orb.Polygon, orb.MultiPolygon:
 		s.Speck = !r.whole

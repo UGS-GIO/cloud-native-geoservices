@@ -131,7 +131,7 @@ func TestTile(t *testing.T) {
 		t.Fatalf("%d features, exceeded %v", len(c.Features), c.Exceeded)
 	}
 	for i := 1; i < len(c.Features); i++ {
-		if spread(c.Features[i].Geom) > spread(c.Features[i-1].Geom) {
+		if spread(geom.Bounds(c.Features[i].Geom)) > spread(geom.Bounds(c.Features[i-1].Geom)) {
 			t.Errorf("features are not largest first at %d", i)
 		}
 	}
