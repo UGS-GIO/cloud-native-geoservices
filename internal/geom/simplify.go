@@ -146,7 +146,12 @@ func (r *reader) run(dims int) ([]orb.Point, error) {
 		r.ys = append(r.ys, math.Float64frombits(r.order.Uint64(r.b[r.off+8:])))
 		r.off += 8 * dims
 	}
-	kept := keep(r.xs, r.ys, r.tol)
+	return r.pick(r.tol), nil
+}
+
+// pick returns the points of the last run that Douglas-Peucker keeps at tolerance.
+func (r *reader) pick(tolerance float64) []orb.Point {
+	kept := keep(r.xs, r.ys, tolerance)
 	count := 0
 	for _, k := range kept {
 		if k {
@@ -159,7 +164,7 @@ func (r *reader) run(dims int) ([]orb.Point, error) {
 			out = append(out, orb.Point{r.xs[i], r.ys[i]})
 		}
 	}
-	return out, nil
+	return out
 }
 
 func (r *reader) line(dims int) (orb.LineString, error) {
@@ -171,14 +176,23 @@ func (r *reader) line(dims int) (orb.LineString, error) {
 	return orb.LineString{{r.xs[0], r.ys[0]}, {r.xs[n-1], r.ys[n-1]}}, nil
 }
 
-// speck is the bounding box of the last run, as a ring.
-func (r *reader) speck() orb.Ring {
+// collapsed is the stand-in for an outer ring that kept too few points: its bounding box when that
+// fits within tolerance, else the ring at a finer tolerance, so a long thin sliver keeps its shape.
+func (r *reader) collapsed() (ring orb.Ring, speck bool) {
 	x0, y0, x1, y1 := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
 	for i := range r.xs {
 		x0, x1 = min(x0, r.xs[i]), max(x1, r.xs[i])
 		y0, y1 = min(y0, r.ys[i]), max(y1, r.ys[i])
 	}
-	return orb.Ring{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}, {x0, y0}}
+	if len(r.xs) < 4 || x1-x0 <= r.tol && y1-y0 <= r.tol {
+		return orb.Ring{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}, {x0, y0}}, true
+	}
+	for _, t := range []float64{r.tol / 4, r.tol / 16, 0} {
+		if out := r.pick(t); len(out) >= 4 || t == 0 {
+			return out, false
+		}
+	}
+	return nil, false
 }
 
 func (r *reader) polygon(dims int) (orb.Polygon, error) {
@@ -196,7 +210,9 @@ func (r *reader) polygon(dims int) (orb.Polygon, error) {
 			rings = append(rings, orb.Ring(out))
 			r.whole = true
 		} else if i == 0 {
-			rings = append(rings, r.speck())
+			ring, speck := r.collapsed()
+			rings = append(rings, ring)
+			r.whole = r.whole || !speck
 		}
 	}
 	return rings, nil

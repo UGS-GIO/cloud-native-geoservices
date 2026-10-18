@@ -22,6 +22,7 @@ func TestFromWKB(t *testing.T) {
 	zigzag := orb.LineString{{0, 0}, {1, 0.01}, {2, 0}, {3, 5}, {4, 0}}
 	square := orb.Ring{{0, 0}, {0, 1}, {1, 1}, {1, 0}, {0, 0}}
 	tiny := orb.Ring{{0, 0}, {0, 0.001}, {0.002, 0.001}, {0.002, 0}, {0, 0}}
+	sliver := orb.Ring{{0, 0}, {1, 1}, {1, 1.004}, {0, 0.004}, {0, 0}}
 	tests := []struct {
 		name  string
 		g     orb.Geometry
@@ -35,6 +36,7 @@ func TestFromWKB(t *testing.T) {
 		{"polygon survives", orb.Polygon{square}, 0.1, orb.Polygon{square}, false},
 		{"small polygon is a speck", orb.Polygon{tiny}, 0.01, orb.Polygon{{{0, 0}, {0.002, 0}, {0.002, 0.001}, {0, 0.001}, {0, 0}}}, true},
 		{"hole that simplifies away is dropped", orb.Polygon{square, tiny}, 0.01, orb.Polygon{square}, false},
+		{"thin sliver keeps its shape", orb.Polygon{sliver}, 0.01, orb.Polygon{sliver}, false},
 		{"multipolygon speck", orb.MultiPolygon{{tiny}}, 0.01, orb.MultiPolygon{{{{0, 0}, {0.002, 0}, {0.002, 0.001}, {0, 0.001}, {0, 0}}}}, true},
 	}
 	for _, tt := range tests {
