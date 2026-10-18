@@ -27,7 +27,10 @@ func TestMatch(t *testing.T) {
 		want  bool
 	}{
 		{"wetland_type = 'Lake'", lake, true},
-		{"WETLAND_TYPE = 'lake'", lake, false},
+		{"WETLAND_TYPE = 'lake'", lake, true}, // strings ignore case
+		{"wetland_type <> 'LAKE'", lake, false},
+		{"wetland_type IN ('lake')", lake, true},
+		{"wetland_type > 'kz'", lake, true},
 		{"wetland_type IN ('Lake','Freshwater Pond') AND acres > 1", lake, true},
 		{"wetland_type NOT IN ('Lake')", lake, false},
 		{"wetland_type LIKE 'la%'", lake, true},

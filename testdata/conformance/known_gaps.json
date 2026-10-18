@@ -91,11 +91,6 @@
    "*/error-stats-field: *"],
    "reason": "An unknown field in where, outFields, orderByFields or outStatistics is not an error: where matches nothing, outFields and orderByFields are dropped, and the statistic is empty."},
   {"match": [
-   "railroads/count-strwhere-lower: count (value)",
-   "*/distinct-ordered: features[].attributes.* (value)",
-   "*/stats-grouped-ordered: features[].attributes.* (value)"],
-   "reason": "Esri's hosted layers compare and sort strings case-insensitively (collation caseSensitive false). We compare with = and sort byte by byte."},
-  {"match": [
    "*/stats*: features[].attributes.stddev_v (value)"],
    "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
   {"match": [

@@ -114,9 +114,6 @@
    "*/stats*: features[].attributes.stddev_v (value)"],
    "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
   {"match": [
-   "rail_lines/count-strwhere-lower: count (value)"],
-   "reason": "Esri's hosted layers compare strings case-insensitively (collation caseSensitive false); = here is case-sensitive."},
-  {"match": [
    "*/stats-string: features[].attributes.min_v (missing)",
    "*/stats-string: features[].attributes.max_v (missing)"],
    "reason": "min and max of a string field are left out."},

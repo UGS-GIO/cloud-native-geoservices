@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/where"
 )
 
 // sorted orders feature indexes by orderByFields, as alasql's ORDER BY compares: a falsy value
@@ -29,9 +30,9 @@ func (w *winnow) sorted(idx []int) []int {
 	return out
 }
 
-// compareKeys is one key of alasql's comparator.
+// compareKeys is one key of alasql's comparator, with strings ignoring case as where compares them.
 func compareKeys(a, b any, desc bool) int {
-	a, b = orEmpty(a), orEmpty(b)
+	a, b = where.Fold(orEmpty(a), orEmpty(b))
 	if js.LooseEqual(a, b) {
 		return 0
 	}

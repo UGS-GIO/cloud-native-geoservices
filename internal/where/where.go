@@ -2,7 +2,8 @@
 // = <> != < <= > >=, AND/OR/NOT, parentheses, [NOT] IN, [NOT] LIKE, IS [NOT] NULL, [NOT] BETWEEN,
 // UPPER/LOWER, string and number literals. Comparisons follow what Koop's alasql does: a null
 // operand makes a comparison false, `=` is strict, `<>` and the orderings are JavaScript's loose
-// ones, and LIKE ignores case. Field names match case-insensitively.
+// ones. Strings compare ignoring case, as on ArcGIS Online hosted layers (collation caseSensitive
+// false), LIKE included. Field names match case-insensitively.
 package where
 
 import (
@@ -422,8 +423,18 @@ func (e notExpr) eval(row Row) any { return !js.Truthy(e.e.eval(row)) }
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
+// Fold lower-cases a and b when both are strings, so they compare ignoring case.
+func Fold(a, b any) (any, any) {
+	if sa, ok := a.(string); ok {
+		if sb, ok := b.(string); ok {
+			return strings.ToLower(sa), strings.ToLower(sb)
+		}
+	}
+	return a, b
+}
+
 func (e cmpExpr) eval(row Row) any {
-	a, b := e.l.eval(row), e.r.eval(row)
+	a, b := Fold(e.l.eval(row), e.r.eval(row))
 	if js.IsNullish(a) || js.IsNullish(b) {
 		return false
 	}
@@ -450,7 +461,7 @@ func (e inExpr) eval(row Row) any {
 		return false
 	}
 	for _, x := range e.list {
-		if js.StrictEqual(v, x.eval(row)) {
+		if js.StrictEqual(Fold(v, x.eval(row))) {
 			return !e.neg
 		}
 	}
@@ -476,7 +487,7 @@ func (e betweenExpr) eval(row Row) any {
 	if js.IsNullish(v) || js.IsNullish(lo) || js.IsNullish(hi) {
 		return false
 	}
-	return (js.LessEqual(lo, v) && js.LessEqual(v, hi)) != e.neg
+	return (js.LessEqual(Fold(lo, v)) && js.LessEqual(Fold(v, hi))) != e.neg
 }
 
 func (e funcExpr) eval(row Row) any {

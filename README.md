@@ -123,7 +123,8 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 `/query` accepts GET and POST. Supported parameters:
 
 - `where`: SQL subset (comparisons, `AND`/`OR`/`NOT`, `IN`, `LIKE`, `IS NULL`, `BETWEEN`,
-  `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals). Field names match case-insensitively.
+  `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals). Field names match case-insensitively, and
+  strings compare and sort ignoring case, as on ArcGIS Online.
 - `objectIds`, `outFields`, `returnGeometry`, `orderByFields`, `resultOffset`,
   `resultRecordCount`, `resultType=tile`, `maxAllowableOffset`, `geometryPrecision`.
 - `geometry` (envelope, point, multipoint, polyline, polygon), `geometryType`, `inSR`,
