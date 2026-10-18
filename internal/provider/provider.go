@@ -476,6 +476,10 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 		return shapes, has, nil
 	}
 	idCol := slices.Index(p.Columns, "feature_id")
+	var cached *geom.Cached
+	if p.Tolerance > 0 && idCol >= 0 {
+		cached = pr.Shapes.At(source.ID(), p.Tolerance)
+	}
 	ids := make([]int64, len(rows))
 	var missing []int
 	for i := range rows {
@@ -486,8 +490,8 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 		if idCol >= 0 {
 			ids[i], _ = values.Get(idCol, i).(int64)
 		}
-		if p.Tolerance > 0 && idCol >= 0 {
-			if sh, ok, found := pr.Shapes.Lookup(source.ID(), ids[i], p.Tolerance); found {
+		if cached != nil {
+			if sh, ok, found := cached.Lookup(ids[i]); found {
 				shapes[i], has[i] = sh, ok
 				continue
 			}
@@ -519,8 +523,8 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 			for k := from; k < to; k++ {
 				i := missing[k]
 				var err error
-				if p.Tolerance > 0 && idCol >= 0 {
-					shapes[i], has[i], err = pr.Shapes.Make(source.ID(), ids[i], wkb.Bytes(0, k), p.Tolerance)
+				if cached != nil {
+					shapes[i], has[i], err = cached.Make(ids[i], wkb.Bytes(0, k))
 				} else {
 					shapes[i], has[i], err = geom.FromWKB(wkb.Bytes(0, k), p.Tolerance)
 				}
