@@ -80,12 +80,12 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	if err != nil {
 		return "", err
 	}
-	layer, err := pr.Open(ctx, item.Data())
-	if err != nil {
-		return "", err
-	}
-	d, err := pr.Catalog.Drawing(ctx, item, render)
-	if err != nil {
+	var layer *pq.Layer
+	var d *catalog.Drawing
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() (err error) { layer, err = pr.Open(gctx, item.Data()); return })
+	g.Go(func() (err error) { d, err = pr.Catalog.Drawing(gctx, item, render); return })
+	if err := g.Wait(); err != nil {
 		return "", err
 	}
 	return item.Version + "|" + layer.ID() + "|" + d.Version, nil
@@ -204,9 +204,20 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if thin {
 		sel.Page = &pq.Page{Offset: p.Page.Offset, Limit: readLimit}
 	}
+	// While a bbox scan runs, fetch the columns the read after it needs.
+	warmed := make(chan struct{})
+	if p.Box != nil && len(p.IDs) == 0 {
+		go func() { source.Warm(ctx, p.Columns, p.Box); close(warmed) }()
+	} else {
+		close(warmed)
+	}
 	rows, err := source.Select(ctx, sel)
+	<-warmed
 	if err != nil {
 		return nil, err
+	}
+	if p.Stream && source == layer {
+		return c, pr.stream(ctx, c, source, p, rows, params)
 	}
 	limit := unlimited
 	switch {
@@ -221,7 +232,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	} else if int64(len(rows)) > limit {
 		readRows = rows[:limit+1]
 	}
-	feats, err := pr.features(ctx, source, p, readRows, thin)
+	feats, err := pr.features(ctx, source, p, readRows, thin, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -257,6 +268,64 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	return c, nil
 }
 
+// stream gives a count or ids every row the filter selects: the first chunk now, the rest through
+// c.Next, each reading at most MaxGeometryRows geometries. A row its bbox settles is dropped or
+// kept without reading its geometry.
+func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.Layer, p *plan.Plan, rows []int64, params query.Raw) error {
+	var known []bool
+	if spatial, err := params.Spatial(); err != nil || spatial == nil || !source.HasBBox {
+		known = make([]bool, len(rows))
+	} else if rows, known, err = settle(ctx, source, spatial, rows); err != nil {
+		return err
+	}
+	next := func() ([]query.Feature, error) {
+		if len(rows) == 0 {
+			return nil, nil
+		}
+		n, read := 0, int64(0)
+		for ; n < len(rows) && read < max(pr.MaxGeometryRows, 1); n++ {
+			if !known[n] {
+				read++
+			}
+		}
+		feats, err := pr.features(ctx, source, p, rows[:n], false, known[:n])
+		rows, known = rows[n:], known[n:]
+		out := make([]query.Feature, len(feats))
+		for i := range feats {
+			out[i] = feats[i].f
+		}
+		return out, err
+	}
+	feats, err := next()
+	c.Features, c.Next, c.Exceeded = feats, next, query.Null
+	return err
+}
+
+// settle drops the rows whose bbox misses the filter and marks those whose bbox meets it.
+func settle(ctx context.Context, source *pq.Layer, spatial *query.Spatial, rows []int64) ([]int64, []bool, error) {
+	bbox, err := source.Read(ctx, pq.BBox, rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	keep, known := rows[:0:0], []bool{}
+	for i, r := range rows {
+		var b [4]float64
+		ok := true
+		for k := range b {
+			if b[k], ok = bbox.Get(k, i).(float64); !ok {
+				break
+			}
+		}
+		if !ok {
+			continue // no geometry
+		}
+		if pass, sure := spatial.Decide(orb.Bound{Min: orb.Point{b[0], b[1]}, Max: orb.Point{b[2], b[3]}}); !sure || pass {
+			keep, known = append(keep, r), append(known, sure)
+		}
+	}
+	return keep, known, nil
+}
+
 // cell is a tolerance-sized cell and a symbol class (the feature's other attributes joined, as
 // the JavaScript provider keys it): one speck is kept per cell.
 type cell struct {
@@ -271,13 +340,14 @@ type shaped struct {
 }
 
 // features reads the plan's columns (and geometry) at rows and builds the features, thinning
-// specks to one per tolerance-sized cell per symbol class when drawing.
-func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool) ([]shaped, error) {
+// specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
+// known to meet the geometry filter, and its geometry is not read.
+func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool) ([]shaped, error) {
 	values, err := source.Read(ctx, p.Columns, rows)
 	if err != nil {
 		return nil, err
 	}
-	shapes, has, err := pr.shapes(ctx, source, p, values, rows)
+	shapes, has, err := pr.shapes(ctx, source, p, values, rows, known)
 	if err != nil {
 		return nil, err
 	}
@@ -292,48 +362,60 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	}
 	out := make([]shaped, 0, len(rows))
 	cells := map[cell]bool{}
-	var class strings.Builder
+	var key []byte
 	for i := range rows {
-		props := make([]any, len(p.Columns))
-		for c := range p.Columns {
-			props[c] = values.Get(c, i)
-		}
-		var g orb.Geometry
 		if (p.Geometry || p.Present) && !has[i] {
 			continue
 		}
+		var g orb.Geometry
 		if p.Geometry {
 			g = shapes[i].G
 		}
 		if thin && shapes[i].Speck {
 			if pt, ok := firstPoint(g); ok {
-				class.Reset()
-				first := true
-				for c, name := range p.Columns {
-					if name == "feature_id" {
-						continue
-					}
-					if !first {
-						class.WriteByte('|')
-					}
-					first = false
-					class.WriteString(js.Join(props[c]))
-				}
-				k := cell{math.Floor(pt[0] / p.Tolerance), math.Floor(pt[1] / p.Tolerance), class.String()}
+				var class string
+				class, key = speckClass(values, p.Columns, i, key)
+				k := cell{math.Floor(pt[0] / p.Tolerance), math.Floor(pt[1] / p.Tolerance), class}
 				if cells[k] {
 					continue
 				}
 				cells[k] = true
 			}
 		}
-		out = append(out, shaped{f: query.Feature{Props: props, Geom: g}, speck: shapes[i].Speck})
+		props := make([]any, len(p.Columns))
+		for c := range p.Columns {
+			props[c] = values.Get(c, i)
+		}
+		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: known != nil && known[i]}, speck: shapes[i].Speck})
 	}
 	return out, nil
 }
 
+// speckClass is row i's symbol class: its attributes but feature_id, which the JavaScript provider
+// joined with "|". They compare by AppendKey unless some text holds a "|", then as joined.
+func speckClass(values *pq.Rows, cols []string, i int, buf []byte) (string, []byte) {
+	buf = append(buf[:0], 0)
+	for c, name := range cols {
+		if name == "feature_id" {
+			continue
+		}
+		var ok bool
+		if buf, ok = values.AppendKey(buf, c, i, '|'); !ok {
+			var parts []string
+			for c, name := range cols {
+				if name != "feature_id" {
+					parts = append(parts, js.Join(values.Get(c, i)))
+				}
+			}
+			return "\x01" + strings.Join(parts, "|"), buf
+		}
+	}
+	return string(buf), buf
+}
+
 // shapes are the rows' geometries at the plan's tolerance: from the shape cache, reading and
 // simplifying WKB (in parallel) only for the rows it does not hold.
-func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, values *pq.Rows, rows []int64) ([]geom.Shape, []bool, error) {
+func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, values *pq.Rows, rows []int64, known []bool) ([]geom.Shape, []bool, error) {
 	shapes := make([]geom.Shape, len(rows))
 	has := make([]bool, len(rows))
 	if !p.Geometry {
@@ -343,6 +425,10 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 	ids := make([]int64, len(rows))
 	var missing []int
 	for i := range rows {
+		if known != nil && known[i] {
+			has[i] = true
+			continue
+		}
 		if idCol >= 0 {
 			ids[i], _ = values.Get(idCol, i).(int64)
 		}

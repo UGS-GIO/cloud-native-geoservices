@@ -86,6 +86,17 @@ func Run(c *Collection, p Params) (*Response, error) {
 		return nil, err
 	}
 	idx := w.filter()
+	if c.Next != nil {
+		// An unpaged count needs no rows kept, only tallied.
+		tally := p.True("returnCountOnly") && w.limit == 0
+		var n int64
+		if idx, n, err = w.drain(idx, tally); err != nil {
+			return nil, err
+		}
+		if tally {
+			return &Response{JSON: jsonx.Obj{{K: "count", V: n}}, Count: &n}, nil
+		}
+	}
 
 	if stats := w.aggregates; stats != nil {
 		return w.statistics(idx)
@@ -140,7 +151,7 @@ type winnow struct {
 	where      where.Expr
 	ids        []any
 	idIndex    int
-	filterGeom orb.Geometry
+	spatial    *Spatial
 	fields     []int // property indexes to output; nil means all
 	order      []orderKey
 	limit      int // resultRecordCount + 1, or 0
@@ -195,11 +206,11 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	}
 
 	if g, ok := p["geometry"]; ok {
-		fg, err := filterGeometry(g, p["inSR"])
-		if err != nil {
+		rel, _ := p.String("spatialRel")
+		var err error
+		if w.spatial, err = newSpatial(g, p["inSR"], rel); err != nil {
 			return nil, err
 		}
-		w.filterGeom = fg
 	}
 
 	if p.True("returnIdsOnly") {
@@ -277,12 +288,41 @@ func (w *winnow) filter() []int {
 		if w.ids != nil && !w.idMatch(ft) {
 			continue
 		}
-		if w.filterGeom != nil && !geom.Intersects(w.filterGeom, ft.Geom) {
+		if w.spatial != nil && !ft.Known && !w.spatial.Match(ft.Geom) {
 			continue
 		}
 		idx = append(idx, i)
 	}
 	return idx
+}
+
+// drain filters the provider's further chunks too, keeping what passes without its geometry, or
+// with tally set only counting it.
+func (w *winnow) drain(idx []int, tally bool) ([]int, int64, error) {
+	var kept []Feature
+	n := int64(0)
+	for {
+		n += int64(len(idx))
+		for _, i := range idx {
+			if !tally {
+				kept = append(kept, Feature{Props: w.c.Features[i].Props})
+			}
+		}
+		chunk, err := w.c.Next()
+		if err != nil {
+			return nil, 0, err
+		}
+		if chunk == nil {
+			w.c.Features = kept
+			idx = make([]int, len(kept))
+			for i := range idx {
+				idx[i] = i
+			}
+			return idx, n, nil
+		}
+		w.c.Features = chunk
+		idx = w.filter()
+	}
 }
 
 func (w *winnow) idMatch(ft *Feature) bool {

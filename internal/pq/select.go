@@ -98,6 +98,9 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 			groups = append(groups, g)
 		}
 	}
+	if err := l.prefetch(ctx, l.bboxLeaves(), groups); err != nil {
+		return nil, err
+	}
 	hits := make([][]int64, len(groups))
 	eg, ectx := errgroup.WithContext(ctx)
 	for k, g := range groups {
@@ -123,6 +126,32 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 		return nil, err
 	}
 	return slices.Concat(hits...), nil
+}
+
+func (l *Layer) bboxLeaves() []leaf {
+	out := make([]leaf, len(BBox))
+	for i, name := range BBox {
+		out[i] = l.leaves[name]
+	}
+	return out
+}
+
+// Warm fetches the chunks of cols in the row groups whose statistics meet box (every group when
+// box is nil), so a read after the bbox scan finds them cached rather than waiting on them.
+func (l *Layer) Warm(ctx context.Context, cols []string, box *[4]float64) error {
+	var leaves []leaf
+	for _, name := range cols {
+		if lf, ok := l.leaves[name]; ok {
+			leaves = append(leaves, lf)
+		}
+	}
+	var groups []int
+	for g, gr := range l.Groups {
+		if box == nil || overlaps(gr, box) {
+			groups = append(groups, g)
+		}
+	}
+	return l.prefetch(ctx, leaves, groups)
 }
 
 // at is value i of a numeric column; a null bound compares as 0, as it does in JavaScript.

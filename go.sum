@@ -22,6 +22,8 @@ github.com/parquet-go/parquet-go v0.32.0 h1:NWDqTUHfrCS4cJP/Fj2HlxvqsrVedWG3sayM
 github.com/parquet-go/parquet-go v0.32.0/go.mod h1:navtkAYr2LGoJVp141oXPlO/sxLvaOe3la2JEoD8+rg=
 github.com/paulmach/orb v0.13.0 h1:r7n7mQGGF+cj/CbcivEj9J3HGK+XR+yXnvzRdq9saIw=
 github.com/paulmach/orb v0.13.0/go.mod h1:6scRWINywA2Jf05dcjOfLfxrUIMECvTSG2MVbRLxu/k=
+github.com/peterstace/simplefeatures v0.59.0 h1:pmn+uh75K3CCGsJCLHnpBqgQmDECLYX3u5hfymVbqmQ=
+github.com/peterstace/simplefeatures v0.59.0/go.mod h1:0QH884YeU4jOeM6Bh7EDdDFyYU1L0I0QONxwwFiknqc=
 github.com/pierrec/lz4/v4 v4.1.33 h1:GjG1TJ1V4IzKP8L96muuuDNpTwd7D+l2ccXrjAbe014=
 github.com/pierrec/lz4/v4 v4.1.33/go.mod h1:7SE9MC2STkNtL4PIwGhjmyVwvILaGI9/COYQNBhKM/c=
 github.com/twpayne/go-geom v1.7.0 h1:zMHTHNlenoHAc2ZSiHFh7SMoG0Wdw8gF0orBnrBhfjE=

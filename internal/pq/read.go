@@ -82,6 +82,12 @@ func (r *Rows) Get(c, i int) any {
 	return cell.V.Get(cell.I)
 }
 
+// AppendKey is Values.AppendKey for column c at row i.
+func (r *Rows) AppendKey(buf []byte, c, i int, sep byte) ([]byte, bool) {
+	cell := r.Cells[c][i]
+	return cell.V.AppendKey(buf, cell.I, sep)
+}
+
 // Bytes is column c's bytes at row i.
 func (r *Rows) Bytes(c, i int) []byte {
 	cell := r.Cells[c][i]
@@ -126,6 +132,13 @@ func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, e
 		leaves[c] = lf
 	}
 
+	groups := make([]int, len(spans))
+	for s, sp := range spans {
+		groups[s] = sp.g
+	}
+	if err := l.prefetch(ctx, leaves, groups); err != nil {
+		return nil, err
+	}
 	// Every (column, row group) in parallel: cached runs, or fetch and decode.
 	runs := make([][][]run, len(cols))
 	g, gctx := errgroup.WithContext(ctx)

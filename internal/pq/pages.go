@@ -242,6 +242,34 @@ func (l *Layer) acquire(ctx context.Context) (func(), error) {
 	}
 }
 
+// maxPrefetch caps what one prefetch holds: past it, chunks are fetched as they are decoded.
+const maxPrefetch = 32 << 20
+
+// prefetch fetches the whole chunks of leaves in groups that are not decoded yet, joined into a
+// few requests, so decoding them reads from the cache.
+func (l *Layer) prefetch(ctx context.Context, leaves []leaf, groups []int) error {
+	var ranges [][2]int64
+	var total int64
+	for _, lf := range leaves {
+		for _, g := range groups {
+			if _, ok := l.reader.decoded.Get(runKey{chunkKey{l.ID(), lf.index, g}, -1}); ok || lf.kind == KindBytes {
+				continue
+			}
+			start, end := l.chunkRange(lf, g)
+			ranges, total = append(ranges, [2]int64{start, end}), total+end-start
+		}
+	}
+	if len(ranges) < 2 || total > maxPrefetch {
+		return nil
+	}
+	release, err := l.hold(ctx, total)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return l.file.Prefetch(ctx, ranges)
+}
+
 // decodeChunk decodes a whole column chunk.
 func (l *Layer) decodeChunk(ctx context.Context, lf leaf, g int) (*Values, error) {
 	start, end := l.chunkRange(lf, g)

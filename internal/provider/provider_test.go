@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,45 @@ func TestCountAndPage(t *testing.T) {
 	c = load(t, pr, "qfaults", query.Raw{"where": "objectid > 0", "returnGeometry": "false"})
 	if c.Exceeded != query.Null || len(c.Features) != 300 || c.Features[0].Geom != nil {
 		t.Errorf("unpaged: exceeded %v, %d features", c.Exceeded, len(c.Features))
+	}
+}
+
+func TestCountAndIDsUnderAFilterCoverTheLayer(t *testing.T) {
+	pr := fixture(t)
+	pr.MaxGeometryRows = 10
+	ring := url.QueryEscape(`{"rings":[[[-180,-90],[-180,90],[180,90],[180,-90],[-180,-90]]]}`)
+	for _, q := range []string{"geometry=-180,-90,180,90", "geometry=" + ring + "&geometryType=esriGeometryPolygon"} {
+		for _, only := range []string{"returnCountOnly=true", "returnIdsOnly=true"} {
+			v, _ := url.ParseQuery(q + "&" + only)
+			p, raw := query.Normalize(v, nil)
+			c := load(t, pr, "qfaults", raw)
+			if c.Next == nil {
+				t.Fatalf("%s %s: not streamed", q, only)
+			}
+			res, err := query.Run(c, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var n int64
+			if res.Count != nil {
+				n = *res.Count
+			} else if res.IDs != nil {
+				n = int64(len(res.IDs.IDs))
+			}
+			if n != 300 {
+				t.Errorf("%s %s: %d rows", q, only, n)
+			}
+		}
+	}
+}
+
+func TestDistinctCoversTheLayer(t *testing.T) {
+	pr := fixture(t)
+	pr.MaxRecords = 10
+	c := load(t, pr, "qfaults", query.Raw{"where": "1=1", "outFields": "faultname", "returnDistinctValues": "true",
+		"returnGeometry": "false", "resultRecordCount": "3"})
+	if len(c.Features) != 300 || c.FiltersApplied["limit"] {
+		t.Errorf("distinct read %d rows, want all 300 unpaged", len(c.Features))
 	}
 }
 

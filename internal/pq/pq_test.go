@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"testing"
 )
@@ -53,3 +54,27 @@ func TestSelectAndRead(t *testing.T) {
 		t.Error("a row past the end should fail")
 	}
 }
+
+func TestAppendKey(t *testing.T) {
+	key := func(v *Values, i int) (string, bool) {
+		b, ok := v.AppendKey(nil, i, '|')
+		return string(b), ok
+	}
+	floats := &Values{Kind: KindFloat, N: 5, Floats: []float64{0, math.Copysign(0, -1), math.NaN(), 1.5, 0},
+		Valid: []bool{true, true, true, true, false}}
+	if a, _ := key(floats, 0); a != must(key(floats, 1)) {
+		t.Error("-0 prints as 0")
+	}
+	if a, _ := key(floats, 3); a == must(key(floats, 0)) || a == must(key(floats, 2)) {
+		t.Error("distinct numbers")
+	}
+	text := &Values{Kind: KindString, N: 3, Data: []byte("a|b"), Offs: []uint32{0, 0, 3, 3}, Valid: []bool{true, true, false}}
+	if a, _ := key(text, 0); a != must(key(text, 2)) || a != must(key(floats, 4)) {
+		t.Error(`"" and null print alike`)
+	}
+	if _, ok := key(text, 1); ok {
+		t.Error("text holding the separator")
+	}
+}
+
+func must(s string, _ bool) string { return s }

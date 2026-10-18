@@ -3,6 +3,7 @@ package geom
 import (
 	"encoding/binary"
 	"math"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/paulmach/orb"
@@ -128,4 +129,89 @@ func FuzzFromWKB(f *testing.F) {
 	f.Fuzz(func(t *testing.T, b []byte, tol float64) {
 		FromWKB(b, tol)
 	})
+}
+
+func TestContains(t *testing.T) {
+	box := orb.Polygon{{{0, 0}, {4, 0}, {4, 4}, {0, 4}, {0, 0}}}
+	holed := orb.Polygon{box[0], {{1, 1}, {1, 2}, {2, 2}, {2, 1}, {1, 1}}}
+	tests := []struct {
+		name string
+		a, b orb.Geometry
+		want bool
+	}{
+		{"point inside", box, orb.Point{1, 1}, true},
+		{"point on the boundary only", box, orb.Point{0, 2}, false},
+		{"point outside", box, orb.Point{5, 1}, false},
+		{"line inside", box, orb.LineString{{1, 1}, {3, 3}}, true},
+		{"line leaving", box, orb.LineString{{1, 1}, {5, 3}}, false},
+		{"polygon inside", box, orb.Polygon{{{1, 1}, {2, 1}, {2, 2}, {1, 1}}}, true},
+		{"polygon sharing an edge", box, orb.Polygon{{{0, 0}, {4, 0}, {2, 2}, {0, 0}}}, true},
+		{"polygon over a hole", holed, orb.Polygon{{{0.5, 0.5}, {3, 0.5}, {3, 3}, {0.5, 0.5}}}, false},
+		{"line across a notch", orb.Polygon{{{0, 0}, {4, 0}, {4, 4}, {2, 1}, {0, 4}, {0, 0}}}, orb.LineString{{1, 3}, {3, 3}}, false},
+		{"larger is not contained", orb.Polygon{{{1, 1}, {2, 1}, {2, 2}, {1, 1}}}, box, false},
+		{"each part inside", box, orb.MultiPolygon{{{{1, 1}, {2, 1}, {2, 2}, {1, 1}}}, {{{3, 3}, {3.5, 3}, {3.5, 3.5}, {3, 3}}}}, true},
+		{"point on a line", orb.LineString{{0, 0}, {2, 2}}, orb.Point{1, 1}, true},
+		{"line through a hole, vertex to vertex", holed, orb.LineString{{1, 1}, {2, 2}}, false},
+		{"line leaving a line between samples", orb.LineString{{0, 0}, {1, 0}, {1, 1}, {1.5, 1}, {1.5, 0}, {2.5, 0}, {2.5, 1}, {3, 1}, {3, 0}, {4, 0}},
+			orb.LineString{{0, 0}, {4, 0}}, false},
+		{"line along a line", orb.LineString{{0, 0}, {2, 0}, {4, 0}}, orb.LineString{{1, 0}, {3, 0}}, true},
+		{"holed polygon around the hole", holed, orb.Polygon{{{0.5, 0.5}, {3, 0.5}, {3, 3}, {0.5, 3}, {0.5, 0.5}},
+			{{0.9, 0.9}, {0.9, 2.1}, {2.1, 2.1}, {2.1, 0.9}, {0.9, 0.9}}}, true},
+		{"empty line", box, orb.LineString{}, false},
+		{"nil", box, nil, false},
+	}
+	for _, tt := range tests {
+		if got := Prepare(tt.a).Contains(tt.b); got != tt.want {
+			t.Errorf("%s: got %v", tt.name, got)
+		}
+	}
+	if !Prepare(box).Within(orb.Polygon{{{-1, -1}, {5, -1}, {5, 5}, {-1, 5}, {-1, -1}}}) || Prepare(box).Within(holed) {
+		t.Error("within")
+	}
+	bowtie := orb.Polygon{{{0, 0}, {4, 4}, {4, 0}, {0, 4}, {0, 0}}}
+	if !isBox(box, Bounds(box)) || isBox(bowtie, Bounds(bowtie)) || isBox(holed, Bounds(holed)) {
+		t.Error("isBox")
+	}
+}
+
+func TestPlace(t *testing.T) {
+	notch := Prepare(orb.Polygon{{{0, 0}, {4, 0}, {4, 4}, {2, 1}, {0, 4}, {0, 0}}})
+	box := Prepare(orb.Polygon{{{0, 0}, {4, 0}, {4, 4}, {0, 4}, {0, 0}}})
+	b := func(x0, y0, x1, y1 float64) orb.Bound {
+		return orb.Bound{Min: orb.Point{x0, y0}, Max: orb.Point{x1, y1}}
+	}
+	tests := []struct {
+		p    *Prepared
+		b    orb.Bound
+		want Place
+	}{
+		{box, b(1, 1, 2, 2), Inside},
+		{box, b(0, 1, 2, 2), Across},
+		{box, b(5, 5, 6, 6), Outside},
+		{notch, b(0.5, 0.2, 1, 0.5), Inside},
+		{notch, b(1.8, 2.5, 2.2, 3.5), Outside},
+		{notch, b(1, 1, 3, 3), Across},
+		{notch, b(3.6, 3, 3.6, 3), Inside},
+		{notch, b(3, 3, 3, 3), Outside},
+	}
+	for i, tt := range tests {
+		if got := tt.p.Place(tt.b); got != tt.want {
+			t.Errorf("%d: got %v want %v", i, got, tt.want)
+		}
+	}
+}
+
+func TestPlaceGrid(t *testing.T) {
+	notch := Prepare(orb.Polygon{{{0, 0}, {4, 0}, {4, 4}, {2, 1}, {0, 4}, {0, 0}}})
+	r := rand.New(rand.NewPCG(1, 2))
+	for range 3 * gridAfter {
+		x, y, s := r.Float64()*5-0.5, r.Float64()*5-0.5, r.Float64()*0.2
+		b := orb.Bound{Min: orb.Point{x, y}, Max: orb.Point{x + s, y + s}}
+		if got, want := notch.Place(b), notch.exact(b); got != want && got != Across {
+			t.Fatalf("%v: grid %v, exact %v", b, got, want)
+		}
+	}
+	if notch.grid == nil {
+		t.Error("no grid")
+	}
 }

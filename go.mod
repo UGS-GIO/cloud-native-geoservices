@@ -7,6 +7,7 @@ toolchain go1.26.8
 require (
 	github.com/parquet-go/parquet-go v0.32.0
 	github.com/paulmach/orb v0.13.0
+	github.com/peterstace/simplefeatures v0.59.0
 	golang.org/x/net v0.61.0
 	golang.org/x/sync v0.24.0
 	google.golang.org/protobuf v1.36.12

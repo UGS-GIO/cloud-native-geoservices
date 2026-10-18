@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"maps"
 	"math"
 	"testing"
 
@@ -27,6 +28,34 @@ func TestKinds(t *testing.T) {
 	}
 }
 
+func TestStream(t *testing.T) {
+	box := map[string]string{"geometry": "1,2,3,4", "returnCountOnly": "true"}
+	with := func(k, v string) map[string]string {
+		m := maps.Clone(box)
+		m[k] = v
+		return m
+	}
+	tests := []struct {
+		params map[string]string
+		stream bool
+	}{
+		{box, true},
+		{with("returnIdsOnly", "true"), true},
+		{with("spatialRel", "esriSpatialRelWithin"), true},
+		{with("returnExtentOnly", "true"), false},
+		{with("f", "geojson"), false},
+		{map[string]string{"returnCountOnly": "true", "where": "acres > 1"}, false},
+	}
+	for _, tt := range tests {
+		if p, _ := New(tt.params, layer, 2000); p.Stream != tt.stream {
+			t.Errorf("%v: stream %v", tt.params, p.Stream)
+		}
+	}
+	if p, _ := New(box, layer, 2000); len(p.Columns) != 1 {
+		t.Errorf("a count reads %v", p.Columns)
+	}
+}
+
 func TestPaging(t *testing.T) {
 	tests := []struct {
 		params map[string]string
@@ -38,6 +67,7 @@ func TestPaging(t *testing.T) {
 		{map[string]string{"orderByFields": "acres DESC"}, nil},
 		{map[string]string{"where": "acres > 1"}, nil},
 		{map[string]string{"outStatistics": "[]"}, nil},
+		{map[string]string{"returnDistinctValues": "true", "resultRecordCount": "5"}, nil},
 	}
 	for _, tt := range tests {
 		p, _ := New(tt.params, layer, 2000)

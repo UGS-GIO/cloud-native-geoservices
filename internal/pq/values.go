@@ -1,5 +1,11 @@
 package pq
 
+import (
+	"bytes"
+	"encoding/binary"
+	"math"
+)
+
 // Kind is how a column's decoded values are stored.
 type Kind uint8
 
@@ -52,6 +58,43 @@ func (v *Values) Bytes(i int) []byte {
 		return nil
 	}
 	return v.Data[v.Offs[i]:v.Offs[i+1]:v.Offs[i+1]]
+}
+
+// AppendKey appends value i so that two values of a column append alike exactly when JavaScript
+// prints them alike in Array#join (null, "" and bytes as nothing, numbers by value). It reports
+// false for text holding sep, which only the printed form compares rightly.
+func (v *Values) AppendKey(buf []byte, i int, sep byte) ([]byte, bool) {
+	if v.Null(i) {
+		return append(buf, 0), true
+	}
+	num := func(f float64) []byte {
+		switch {
+		case f == 0:
+			f = 0 // -0 prints as 0
+		case math.IsNaN(f):
+			f = math.NaN()
+		}
+		return binary.LittleEndian.AppendUint64(append(buf, 1), math.Float64bits(f))
+	}
+	switch v.Kind {
+	case KindInt:
+		return num(float64(v.Ints[i])), true
+	case KindFloat:
+		return num(v.Floats[i]), true
+	case KindBool:
+		if v.Bools[i] {
+			return append(buf, 2, 1), true
+		}
+		return append(buf, 2, 0), true
+	case KindString:
+		s := v.Data[v.Offs[i]:v.Offs[i+1]]
+		if len(s) == 0 {
+			return append(buf, 0), true
+		}
+		buf = binary.AppendUvarint(append(buf, 3), uint64(len(s)))
+		return append(buf, s...), bytes.IndexByte(s, sep) < 0
+	}
+	return append(buf, 0), true
 }
 
 // Size is roughly what the values hold in memory.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -118,6 +119,11 @@ func (p Params) Validate() error {
 			return Bad("'quantizationParameters' parameter is invalid", `"quantizationParameters" must be of type object`)
 		}
 	}
+	if v, ok := p["spatialRel"]; ok {
+		if s, _ := v.(string); !slices.Contains(spatialRels, s) {
+			return Bad("'spatialRel' parameter is invalid", `"spatialRel" must be one of [`+strings.Join(spatialRels, ", ")+`]`)
+		}
+	}
 	for _, k := range []string{"outSR", "inSR"} {
 		if v, ok := p[k]; ok {
 			if id, ok := wkid(v); ok && !supported(id) {
@@ -127,6 +133,9 @@ func (p Params) Validate() error {
 	}
 	return nil
 }
+
+// spatialRels are the relationships the geometry filter honours, as the layer advertises.
+var spatialRels = []string{"esriSpatialRelIntersects", "esriSpatialRelContains", "esriSpatialRelEnvelopeIntersects", "esriSpatialRelWithin"}
 
 func typeOf(v any) string {
 	switch v.(type) {
