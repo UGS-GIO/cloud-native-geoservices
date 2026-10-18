@@ -44,7 +44,8 @@ func (s SpatialRef) AppendJSON(buf []byte) []byte {
 var outputSRs = map[int]SpatialRef{102100: {102100, 3857}, 3857: {3857, 3857}, 102113: {102113, 3785},
 	3785: {3785, 3785}, 4269: {4269, 4269}}
 
-var selectAll = regexp.MustCompile(`1\s*=\s*1`)
+// selectAll is a where that is only 1=1, which needs no evaluating.
+var selectAll = regexp.MustCompile(`^\s*1\s*=\s*1\s*$`)
 
 // plusAsSpace turns + outside quotes into spaces, as Koop does for form-encoded where clauses.
 func plusAsSpace(w string) string {

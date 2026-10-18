@@ -157,9 +157,8 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
 - The service path prefix `/ugs/rest/services` is fixed.
 - `testdata/conformance/known_gaps.json` lists every other difference from ArcGIS Online that the
   conformance suite finds.
-- Some behavior follows Koop, which this service replaced: a `where` that contains `1=1` is
-  ignored, `exceededTransferLimit` is null when the server did not page, and multipolygon rings
-  are written hole first.
+- Some behavior follows Koop, which this service replaced: `exceededTransferLimit` is null when
+  the server did not page, and multipolygon rings are written hole first.
 
 ## Conformance
 
