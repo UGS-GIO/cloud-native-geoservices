@@ -8,7 +8,7 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 )
 
-var layer = Layer{Columns: []pq.Column{{Name: "feature_id"}, {Name: "acres"}, {Name: "wetland_type"}, {Name: "count"}}}
+var layer = Layer{Columns: []pq.Column{{Name: "feature_id"}, {Name: "acres"}, {Name: "wetland_type"}, {Name: "count"}}, BBox: true}
 
 func TestKinds(t *testing.T) {
 	tests := []struct {
@@ -68,12 +68,16 @@ func TestPaging(t *testing.T) {
 		{map[string]string{"where": "acres > 1"}, nil},
 		{map[string]string{"outStatistics": "[]"}, nil},
 		{map[string]string{"returnDistinctValues": "true", "resultRecordCount": "5"}, nil},
+		{map[string]string{"geometry": "1,2,3,4"}, &pq.Page{Limit: 2000}},
 	}
 	for _, tt := range tests {
 		p, _ := New(tt.params, layer, 2000)
 		if (p.Page == nil) != (tt.page == nil) || p.Page != nil && *p.Page != *tt.page {
 			t.Errorf("%v: page %v, want %v", tt.params, p.Page, tt.page)
 		}
+	}
+	if p, _ := New(map[string]string{"geometry": "1,2,3,4"}, Layer{Columns: layer.Columns}, 2000); p.Page != nil {
+		t.Error("without a covering, a spatial filter's page comes after the exact test")
 	}
 }
 

@@ -31,6 +31,7 @@ const (
 type Layer struct {
 	Columns []pq.Column
 	Point   bool
+	BBox    bool // has the bbox covering columns
 }
 
 // Plan is what to read.
@@ -285,7 +286,9 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	ordered := !hasOrder || order == "" || featureIDOrder.MatchString(order)
 	// Distinct values are a page of the values across every row, not of a page of rows.
 	distinct := isTrue(params["returnDistinctValues"])
-	if simple && ordered && !countOnly && !distinct && !idsOnly && !stats {
+	// Without a covering, rows are paged only after the exact spatial test.
+	spatialOK := p.Box == nil || layer.BBox
+	if simple && ordered && spatialOK && !countOnly && !distinct && !idsOnly && !stats {
 		off := js.ParseNumber(params["resultOffset"])
 		if math.IsNaN(off) || off < 0 {
 			off = 0

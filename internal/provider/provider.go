@@ -161,7 +161,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if params["resultType"] == "tile" {
 		maxRecords = pr.TileMaxRecords
 	}
-	p, err := plan.New(params, plan.Layer{Columns: layer.Columns, Point: layer.Point}, maxRecords)
+	p, err := plan.New(params, plan.Layer{Columns: layer.Columns, Point: layer.Point, BBox: layer.HasBBox}, maxRecords)
 	if err != nil {
 		return nil, query.Bad(err.Error())
 	}
@@ -172,7 +172,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		if source, err = pr.Open(ctx, ov); err != nil {
 			return nil, err
 		}
-		if p, err = plan.New(params, plan.Layer{Columns: source.Columns, Point: source.Point}, maxRecords); err != nil {
+		if p, err = plan.New(params, plan.Layer{Columns: source.Columns, Point: source.Point, BBox: source.HasBBox}, maxRecords); err != nil {
 			return nil, query.Bad(err.Error())
 		}
 	}
