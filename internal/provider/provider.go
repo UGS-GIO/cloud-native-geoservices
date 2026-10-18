@@ -210,15 +210,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if thin {
 		sel.Page = &pq.Page{Offset: p.Page.Offset, Limit: readLimit}
 	}
-	// While a bbox scan runs, fetch the columns the read after it needs.
-	warmed := make(chan struct{})
-	if p.Box != nil && len(p.IDs) == 0 {
-		go func() { source.Warm(ctx, p.Columns, p.Box); close(warmed) }()
-	} else {
-		close(warmed)
-	}
 	rows, err := source.Select(ctx, sel)
-	<-warmed
 	if err != nil {
 		return nil, err
 	}
@@ -349,6 +341,9 @@ type shaped struct {
 // specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
 // known to meet the geometry filter, and its geometry is not read.
 func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool) ([]shaped, error) {
+	if err := pr.warm(ctx, source, p, rows, known); err != nil {
+		return nil, err
+	}
 	values, err := source.Read(ctx, p.Columns, rows)
 	if err != nil {
 		return nil, err
@@ -395,6 +390,40 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: known != nil && known[i]}, speck: shapes[i].Speck})
 	}
 	return out, nil
+}
+
+// warm fetches the attributes at rows and the geometry shapes will read, together: shapes needs
+// the attributes (feature_id) before it knows which geometry to read. A file whose feature_id is
+// the row number + 1 looks its shapes up by row here; elsewhere every unknown row's is fetched.
+func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool) error {
+	var geomRows []int64
+	if p.Geometry {
+		cached := p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id")
+		for i, r := range rows {
+			if known != nil && known[i] {
+				continue
+			}
+			if cached {
+				if _, _, found := pr.Shapes.Lookup(source.ID(), r+1, p.Tolerance); found {
+					continue
+				}
+			}
+			geomRows = append(geomRows, r)
+		}
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return source.Warm(gctx, p.Columns, rows) })
+	if len(geomRows) > 0 {
+		g.Go(func() error {
+			release, err := pr.admit(gctx, source.GeomBytes(geomRows))
+			if err != nil {
+				return err
+			}
+			defer release()
+			return source.Warm(gctx, []string{source.Geom}, geomRows)
+		})
+	}
+	return g.Wait()
 }
 
 // speckClass is row i's symbol class: its attributes but feature_id, which the JavaScript provider

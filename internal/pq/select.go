@@ -244,20 +244,18 @@ func (l *Layer) bboxLeaves() []leaf {
 	return out
 }
 
-// Warm fetches the chunks of cols in the row groups whose statistics meet box (every group when
-// box is nil), so a read after the bbox scan finds them cached rather than waiting on them.
-func (l *Layer) Warm(ctx context.Context, cols []string, box *[4]float64) error {
+// Warm fetches what reading cols at the sorted rows needs, joined into a few requests, so the
+// reads that follow find it cached.
+func (l *Layer) Warm(ctx context.Context, cols []string, rows []int64) error {
 	var leaves []leaf
 	for _, name := range cols {
 		if lf, ok := l.leaves[name]; ok {
 			leaves = append(leaves, lf)
 		}
 	}
-	var spans []rgSpan
-	for g, gr := range l.Groups {
-		if box == nil || overlaps(gr, box) {
-			spans = append(spans, rgSpan{g: g})
-		}
+	spans, err := l.spans(rows)
+	if err != nil || len(leaves) == 0 {
+		return err
 	}
 	return l.prefetch(ctx, leaves, spans)
 }
