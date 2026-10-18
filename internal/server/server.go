@@ -153,6 +153,12 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isQuery := op == "query"
+	// A GET the cache answers needs no parameters read: only a valid request was cached.
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if version, err := s.Provider.Version(r.Context(), topic, render); err == nil && s.cached(w, r, etag(version, r)) {
+			return
+		}
+	}
 	p, raw, err := s.params(r)
 	if err == nil && isQuery {
 		err = s.checkLimits(raw)
@@ -167,12 +173,7 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag := etag(version, r)
-	if notModified(r, tag) {
-		s.send(w, r, nil, tag)
-		return
-	}
-	if hit, ok := s.responses.Get(tag); ok {
-		s.send(w, r, hit, tag)
+	if s.cached(w, r, tag) {
 		return
 	}
 	// A full scan waits for its own few slots first, so scans queued behind each other hold no work slot.
@@ -205,6 +206,19 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 	out = pack(out)
 	s.responses.Put(tag, out, out.size())
 	s.send(w, r, out, tag)
+}
+
+// cached answers from the client's copy or the response cache, when either has tag.
+func (s *Server) cached(w http.ResponseWriter, r *http.Request, tag string) bool {
+	if notModified(r, tag) {
+		s.send(w, r, nil, tag)
+		return true
+	}
+	if hit, ok := s.responses.Get(tag); ok {
+		s.send(w, r, hit, tag)
+		return true
+	}
+	return false
 }
 
 // answer loads the topic and encodes the response the route asks for.
