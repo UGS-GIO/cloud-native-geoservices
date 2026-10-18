@@ -1,8 +1,8 @@
 // Package where parses and evaluates the SQL-92 `where` subset ArcGIS clients send:
 // = <> != < <= > >=, AND/OR/NOT, parentheses, [NOT] IN, [NOT] LIKE, IS [NOT] NULL, [NOT] BETWEEN,
-// UPPER/LOWER, string and number literals. Comparisons follow what Koop's alasql does: a null
-// operand makes a comparison false, `=` is strict, `<>` and the orderings are JavaScript's loose
-// ones. Strings compare ignoring case, as on ArcGIS Online hosted layers (collation caseSensitive
+// UPPER/LOWER, string and number literals. Logic is SQL's three-valued one: a comparison with a
+// null is unknown, NOT unknown is unknown, and only true matches. `=` is strict, `<>` and the
+// orderings are JavaScript's loose ones. Strings compare ignoring case, as on ArcGIS Online hosted layers (collation caseSensitive
 // false), LIKE included. Field names match case-insensitively.
 package where
 
@@ -28,7 +28,7 @@ type Row func(field int) any
 type Resolver func(name string) (int, bool)
 
 // Match reports whether row satisfies e.
-func Match(e Expr, row Row) bool { return js.Truthy(e.eval(row)) }
+func Match(e Expr, row Row) bool { return truth(e.eval(row)) == true }
 
 // Error is a where clause that does not parse.
 type Error struct{ Where string }
@@ -413,12 +413,32 @@ type funcExpr struct {
 func (e lit) eval(Row) any       { return e.v }
 func (e field) eval(row Row) any { return row(int(e)) }
 func (e logicExpr) eval(row Row) any {
-	if js.Truthy(e.l.eval(row)) != e.and {
-		return !e.and // AND stops at a falsy operand, OR at a truthy one
+	l := truth(e.l.eval(row))
+	if l == !e.and {
+		return l // AND stops at false, OR at true
 	}
-	return js.Truthy(e.r.eval(row))
+	r := truth(e.r.eval(row))
+	if l == nil && r != !e.and {
+		return nil
+	}
+	return r
 }
-func (e notExpr) eval(row Row) any { return !js.Truthy(e.e.eval(row)) }
+func (e notExpr) eval(row Row) any { return not(truth(e.e.eval(row))) }
+
+// truth is v as an SQL truth value: true, false or nil for unknown.
+func truth(v any) any {
+	if v == nil {
+		return nil
+	}
+	return js.Truthy(v)
+}
+
+func not(v any) any {
+	if v == nil {
+		return nil
+	}
+	return !v.(bool)
+}
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
@@ -435,7 +455,7 @@ func Fold(a, b any) (any, any) {
 func (e cmpExpr) eval(row Row) any {
 	a, b := Fold(e.l.eval(row), e.r.eval(row))
 	if js.IsNullish(a) || js.IsNullish(b) {
-		return false
+		return nil
 	}
 	switch e.op {
 	case "=", "==":
@@ -457,20 +477,24 @@ func (e cmpExpr) eval(row Row) any {
 func (e inExpr) eval(row Row) any {
 	v := e.v.eval(row)
 	if js.IsNullish(v) {
-		return false
+		return nil
 	}
+	var out any = e.neg
 	for _, x := range e.list {
-		if js.StrictEqual(Fold(v, x.eval(row))) {
+		x := x.eval(row)
+		if js.IsNullish(x) {
+			out = nil // no match is unknown when the list has a null
+		} else if js.StrictEqual(Fold(v, x)) {
 			return !e.neg
 		}
 	}
-	return e.neg
+	return out
 }
 
 func (e *likeExpr) eval(row Row) any {
 	v, pat := e.v.eval(row), e.pattern.eval(row)
 	if js.IsNullish(v) || js.IsNullish(pat) {
-		return false
+		return nil
 	}
 	p := js.String(pat)
 	re, ok := e.cache[p]
@@ -484,7 +508,7 @@ func (e *likeExpr) eval(row Row) any {
 func (e betweenExpr) eval(row Row) any {
 	v, lo, hi := e.v.eval(row), e.lo.eval(row), e.hi.eval(row)
 	if js.IsNullish(v) || js.IsNullish(lo) || js.IsNullish(hi) {
-		return false
+		return nil
 	}
 	return (js.LessEqual(Fold(lo, v)) && js.LessEqual(Fold(v, hi))) != e.neg
 }

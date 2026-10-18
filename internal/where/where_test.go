@@ -44,7 +44,12 @@ func TestMatch(t *testing.T) {
 		{"acres IS NULL", null, true},
 		{"acres IS NOT NULL", lake, true},
 		{"acres > 1", null, false},
-		{"NOT (acres > 1)", null, true}, // alasql: a null comparison is falsy, and NOT of it true
+		{"NOT (acres > 1)", null, false}, // NOT unknown is unknown
+		{"acres > 1 OR NOT (acres > 1)", null, false},
+		{"acres > 1 OR acres IS NULL", null, true},
+		{"NOT (acres > 1 AND count = 4)", lake, true},
+		{"wetland_type NOT IN ('x', NULL)", lake, false},
+		{"wetland_type IN ('Lake', NULL)", lake, true},
 		{"UPPER(wetland_type) = 'LAKE'", lake, true},
 		{"lower(name) LIKE '%utah%'", lake, true},
 		{"count = '3'", lake, false},  // = is strict
