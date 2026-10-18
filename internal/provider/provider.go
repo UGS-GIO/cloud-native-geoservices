@@ -238,13 +238,20 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	// A drawing tile over the limit keeps its largest features, as the vector tiles drop the
 	// smallest: flagging it exceeded makes Map Viewer split it into four and ask again, repeatedly.
 	tile := params["resultType"] == "tile" && thin
+	order := make([]int, len(feats))
+	for i := range order {
+		order[i] = i
+	}
 	if tile && int64(len(feats)) > limit {
 		for i := range feats {
 			if !feats[i].speck {
 				feats[i].size = spread(feats[i].bound)
 			}
 		}
-		slices.SortStableFunc(feats, func(a, b shaped) int { return cmp.Compare(b.size, a.size) })
+		// A stable sort by size, as indexes: the features are too large to move around.
+		slices.SortFunc(order, func(a, b int) int {
+			return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
+		})
 	}
 	// Mirrors JavaScript's `!tile && (over || (thin && read past))`, where thin is null without a page.
 	switch {
@@ -257,12 +264,12 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	case thin && int64(len(rows)) > readLimit:
 		c.Exceeded = query.True
 	}
-	if int64(len(feats)) > limit {
-		feats = feats[:limit]
+	if int64(len(order)) > limit {
+		order = order[:limit]
 	}
-	c.Features = make([]query.Feature, len(feats))
-	for i := range feats {
-		c.Features[i] = feats[i].f
+	c.Features = make([]query.Feature, len(order))
+	for i, k := range order {
+		c.Features[i] = feats[k].f
 	}
 	return c, nil
 }
