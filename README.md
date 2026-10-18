@@ -154,9 +154,38 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
 - `spatialRel` values other than the four above give a 400. There is no support for `having`,
   `returnZ`/`returnM`, attachments, related records or edits.
 - The service path prefix `/ugs/rest/services` is fixed.
+- `testdata/conformance/known_gaps.json` lists every other difference from ArcGIS Online that the
+  conformance suite finds.
 - Some behavior follows Koop, which this service replaced: a `where` that contains `1=1` is
   ignored, `exceededTransferLimit` is null when the server did not page, and multipolygon rings
   are written hole first.
+
+## Conformance
+
+`conformance/` compares this server with real ArcGIS FeatureServer layers. Each reference layer
+has a GeoParquet copy (object ids kept as `feature_id`, Esri field types, EPSG:4326 at full
+precision) and Esri's recorded answers to the requests in `testdata/conformance/requests.json`.
+The test serves the copy, sends the same requests and compares the answers. Row order counts only
+where the request sets one, and numbers match within a tolerance. Every difference must be listed
+in `known_gaps.json` with a reason, and a listed gap that no longer happens fails too.
+
+- Small tier: three Utah layers (point, line, polygon) in `testdata/conformance/layers`. It runs
+  in `go test ./...`.
+- Large tier: two national layers. The data is a release asset, not in git. A nightly workflow
+  (`conformance-large.yml`) downloads it and runs `TestLarge`, which also logs timings.
+
+The layers and their request values are in `testdata/conformance/layers.json`. To refresh:
+
+```bash
+go run ./cmd/conformance-record                                  # small tier, in place
+go run ./cmd/conformance-record -tier large -out /tmp/large      # large tier
+CONFORMANCE_LARGE=/tmp/large go test ./conformance -run TestLarge -v -timeout 60m
+tar -czf conformance-large.tar.gz -C /tmp/large .
+gh release create conformance-data --title "Conformance data" --notes "Large conformance layers" --latest=false  # once
+gh release upload conformance-data conformance-large.tar.gz --clobber
+```
+
+`-skip-extract` records the answers again and keeps the copies.
 
 ## Development
 
@@ -181,6 +210,7 @@ go test ./internal/where -fuzz FuzzParse        # also FuzzFromWKB (geom), FuzzR
 | `internal/pbf` | Esri FeatureCollection protocol buffer |
 | `internal/js` | JavaScript conversion and comparison rules |
 | `internal/jsonx`, `internal/lru` | ordered JSON writer; byte-bounded LRU |
+| `conformance`, `cmd/conformance-record` | comparison with recorded Esri answers; the recorder |
 
 ## License
 
