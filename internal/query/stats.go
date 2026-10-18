@@ -40,17 +40,24 @@ func (w *winnow) parseStatistics() error {
 		if name == "" {
 			name = kind + "_" + field
 		}
-		a := aggregate{strings.ToUpper(kind), field, space.ReplaceAllString(name, "_"), w.c.propIndex(field)}
+		a := aggregate{kind: strings.ToUpper(kind), name: space.ReplaceAllString(name, "_")}
 		switch a.kind {
 		case "COUNT", "SUM", "MIN", "MAX", "AVG", "STDDEV", "VAR":
 		default:
 			return Bad("Unsupported statisticType: " + kind)
 		}
+		if a.field, a.prop, ok = w.c.field(field); !ok {
+			return Bad("Invalid onStatisticField: " + field)
+		}
 		w.aggregates = append(w.aggregates, a)
 	}
 	if s, ok := w.p.String("groupByFieldsForStatistics"); ok {
 		for _, g := range strings.Split(s, ",") {
-			w.groupBy = append(w.groupBy, strings.TrimSpace(g))
+			g = strings.TrimSpace(g)
+			if _, _, ok := w.c.field(g); !ok {
+				return Bad("Invalid groupByFieldsForStatistics: " + g)
+			}
+			w.groupBy = append(w.groupBy, g)
 		}
 	}
 	return nil
@@ -128,7 +135,7 @@ type group struct {
 func (w *winnow) statistics(idx []int) (*Response, error) {
 	groupProps := make([]int, len(w.groupBy))
 	for i, g := range w.groupBy {
-		groupProps[i] = w.c.propIndex(g)
+		_, groupProps[i], _ = w.c.field(g)
 	}
 	var groups []*group
 	byKey := map[string]*group{}
@@ -174,8 +181,7 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 	if len(w.order) > 0 {
 		slices.SortStableFunc(rows, func(a, b jsonx.Obj) int {
 			for _, k := range w.order {
-				va, _ := a.Get(k.name)
-				vb, _ := b.Get(k.name)
+				va, vb := getFold(a, k.name), getFold(b, k.name)
 				if c := compareKeys(va, vb, k.desc); c != 0 {
 					return c
 				}
@@ -199,11 +205,8 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 	if len(rows) > 0 {
 		for _, kv := range rows[0] {
 			if slices.Contains(w.groupBy, kv.K) {
-				if f, ok := esri.GroupField(w.c.Meta, kv.K); ok {
-					fields = append(fields, f)
-				} else {
-					fields = append(fields, esri.ValueField(kv.K, kv.V))
-				}
+				f, _ := esri.GroupField(w.c.Meta, kv.K)
+				fields = append(fields, f)
 				continue
 			}
 			fields = append(fields, esri.StatisticField(kv.K, isDateName(dateFields, kv.K)))
@@ -221,6 +224,21 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 	}
 	out := jsonx.Obj{{K: "displayFieldName", V: ""}, {K: "fields", V: fieldObjs}, {K: "features", V: jsonFeats}}
 	return &Response{JSON: out, Features: &FeatureSet{Fields: fields, Features: feats, NoGeometry: true}}, nil
+}
+
+// getFold is a row's value for a key in any case.
+func getFold(row jsonx.Obj, key string) any {
+	for _, kv := range row {
+		if strings.EqualFold(kv.K, key) {
+			return kv.V
+		}
+	}
+	return nil
+}
+
+// outputName reports a statistic's output name, which orderByFields may sort by.
+func (w *winnow) outputName(name string) bool {
+	return slices.ContainsFunc(w.aggregates, func(a aggregate) bool { return strings.EqualFold(a.name, name) })
 }
 
 func isDateName(dates map[string]bool, key string) bool {

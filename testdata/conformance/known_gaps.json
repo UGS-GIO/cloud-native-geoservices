@@ -84,13 +84,6 @@
  ],
  "known": [
   {"match": [
-   "*/error-where-field: error (missing)",
-   "*/error-where-field: count (extra)",
-   "*/error-outfields: *",
-   "*/error-orderby: *",
-   "*/error-stats-field: *"],
-   "reason": "An unknown field in where, outFields, orderByFields or outStatistics is not an error: where matches nothing, outFields and orderByFields are dropped, and the statistic is empty."},
-  {"match": [
    "*/stats*: features[].attributes.stddev_v (value)"],
    "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
   {"match": [
@@ -123,10 +116,6 @@
    "*/geojson-count: properties (missing)",
    "*/geojson-count: type (missing)"],
    "reason": "f=geojson: features have no id, have no type when outFields is not *, and a count is {\"count\": n} where Esri writes a FeatureCollection with properties.count."},
-  {"match": [
-   "*/features-subset-case: features[].attributes.* (missing)",
-   "*/features-subset-case: fields[*] (missing)"],
-   "reason": "outFields names are case-sensitive; Esri matches them in any case."},
   {"match": [
    "*/features-utm: error (extra)",
    "*/features-utm: * (missing)"],

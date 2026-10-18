@@ -219,21 +219,41 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if p.True("returnIdsOnly") {
 		w.fields = []int{w.idIndex}
 	} else if s, ok := p.String("outFields"); ok && s != "*" {
+		w.fields = []int{}
 		for _, name := range strings.Split(s, ",") {
-			if i := c.propIndex(strings.TrimSpace(name)); i >= 0 {
+			if name = strings.TrimSpace(name); name == "" {
+				continue
+			}
+			_, i, ok := c.field(name)
+			if !ok {
+				return nil, Bad("'outFields' parameter is invalid")
+			}
+			if i >= 0 {
 				w.fields = append(w.fields, i)
 			}
 		}
-		if w.fields == nil {
-			w.fields = []int{}
-		}
 	}
 
+	if err := w.parseStatistics(); err != nil {
+		return nil, err
+	}
 	if s, ok := p.String("orderByFields"); ok && !applied["orderByFields"] {
 		for _, part := range strings.Split(s, ",") {
-			part = strings.TrimSpace(part)
-			name, dir, _ := strings.Cut(part, " ")
-			w.order = append(w.order, orderKey{c.propIndex(name), strings.EqualFold(dir, "DESC"), name})
+			words := strings.Fields(part)
+			if len(words) == 0 {
+				continue
+			}
+			k := orderKey{prop: -1, name: words[0]}
+			if len(words) > 2 || len(words) == 2 && !strings.EqualFold(words[1], "ASC") && !strings.EqualFold(words[1], "DESC") {
+				return nil, Bad("'" + strings.TrimSpace(part) + "' parameter is invalid")
+			}
+			k.desc = len(words) == 2 && strings.EqualFold(words[1], "DESC")
+			if name, i, ok := c.field(k.name); ok {
+				k.name, k.prop = name, i
+			} else if !w.outputName(k.name) {
+				return nil, Bad("'" + k.name + "' parameter is invalid")
+			}
+			w.order = append(w.order, k)
 		}
 	}
 	if n, ok := p.Number("resultRecordCount"); ok && !applied["resultRecordCount"] && !applied["limit"] && isInt(n) && n != 0 {
@@ -263,9 +283,6 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 		}
 		v := int(n)
 		w.precision = &v
-	}
-	if err := w.parseStatistics(); err != nil {
-		return nil, err
 	}
 	return w, nil
 }

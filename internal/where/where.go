@@ -35,7 +35,7 @@ type Error struct{ Where string }
 
 func (e *Error) Error() string { return `Invalid "where" parameter: ` + e.Where }
 
-// Parse compiles where. Fields the resolver does not know evaluate as null.
+// Parse compiles where. A field the resolver does not know is an error.
 func Parse(where string, resolve Resolver) (Expr, error) {
 	toks, err := lex(where)
 	if err != nil {
@@ -313,9 +313,9 @@ func (p *parser) value() (Expr, error) {
 				}
 				return lit{ms}, nil
 			}
-			return p.column(t.text), nil
+			return p.column(t.text)
 		case "ESCAPE":
-			return p.column(t.text), nil
+			return p.column(t.text)
 		}
 	case tLParen:
 		e, err := p.or()
@@ -352,17 +352,16 @@ func (p *parser) value() (Expr, error) {
 			}
 			return nil, errSyntax
 		}
-		return p.column(t.text), nil
+		return p.column(t.text)
 	}
 	return nil, errSyntax
 }
 
-// column is a field reference; an unknown name evaluates as null.
-func (p *parser) column(name string) Expr {
+func (p *parser) column(name string) (Expr, error) {
 	if i, ok := p.resolve(name); ok {
-		return field(i)
+		return field(i), nil
 	}
-	return lit{nil}
+	return nil, errSyntax
 }
 
 func parseTime(s string) (float64, error) {

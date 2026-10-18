@@ -50,7 +50,6 @@ func TestMatch(t *testing.T) {
 		{"count = '3'", lake, false},  // = is strict
 		{"count <> '3'", lake, false}, // <> is loose
 		{"name = 'O''Brien'", row(nil, nil, "O'Brien", nil, nil), true},
-		{"missing = 1", lake, false},
 		{"acres > -1", lake, true},
 		{`"wetland_type" = 'Lake'`, lake, true},
 		{"date IN ('1961')", row(nil, nil, nil, nil, nil, "1961", nil), true},
@@ -71,7 +70,7 @@ func TestMatch(t *testing.T) {
 }
 
 func TestParseErrors(t *testing.T) {
-	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE"} {
+	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE", "missing = 1", "missing IS NULL"} {
 		if _, err := Parse(w, resolve); err == nil {
 			t.Errorf("%q parsed", w)
 		} else if !strings.Contains(err.Error(), `Invalid "where" parameter`) {
