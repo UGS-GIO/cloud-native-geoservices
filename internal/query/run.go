@@ -297,8 +297,8 @@ func (w *winnow) filter() []int {
 	return idx
 }
 
-// drain filters the provider's further chunks too, keeping what passes without its geometry, or
-// with tally set only counting it.
+// drain filters the provider's further chunks too, keeping what passes without its geometry (an
+// extent keeps its bounds), or with tally set only counting it.
 func (w *winnow) drain(idx []int, tally bool) ([]int, int64, error) {
 	var kept []Feature
 	n := int64(0)
@@ -306,7 +306,11 @@ func (w *winnow) drain(idx []int, tally bool) ([]int, int64, error) {
 		n += int64(len(idx))
 		for _, i := range idx {
 			if !tally {
-				kept = append(kept, Feature{Props: w.c.Features[i].Props})
+				ft := Feature{Props: w.c.Features[i].Props}
+				if g := w.c.Features[i].Geom; g != nil && w.p.True("returnExtentOnly") {
+					ft.Geom = geom.Bounds(g).ToRing()
+				}
+				kept = append(kept, ft)
 			}
 		}
 		chunk, err := w.c.Next()

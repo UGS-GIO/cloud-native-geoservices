@@ -47,8 +47,9 @@ type Plan struct {
 	Page           *pq.Page
 	FiltersApplied map[string]bool
 
-	// Stream: a count or ids under a spatial filter, which cover every row however many geometries
-	// that reads, so the provider hands them over a chunk at a time and the query keeps no geometry.
+	// Stream: a count, ids or extent under a spatial filter (or an extent from geometry), which
+	// cover every row however many geometries that reads, so the provider hands them over a chunk
+	// at a time and the query keeps no geometry.
 	Stream bool
 }
 
@@ -222,7 +223,8 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	}
 
 	idsOnly, stats := isTrue(params["returnIdsOnly"]), params["outStatistics"] != ""
-	p.Stream = p.Box != nil && (countOnly || idsOnly) && !extentOnly && !stats &&
+	geometryExtent := extentOnly && !layer.BBox
+	p.Stream = (p.Box != nil || geometryExtent) && (countOnly || idsOnly || extentOnly) && !stats &&
 		!isTrue(params["returnDistinctValues"]) && params["f"] != "geojson"
 
 	// Columns: the requested outFields plus anything where, ordering or statistics read.
@@ -265,7 +267,7 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	// Anything under a spatial filter still needs geometry, for the exact test; the response
 	// leaves it out when returnGeometry is false. Statistics return none, so without a filter they
 	// read none and cover the whole layer, not the rows a geometry read is capped at.
-	if extentOnly && !layer.BBox {
+	if geometryExtent {
 		p.Geometry = true
 	} else if idsOnly || countOnly || stats || extentOnly || params["returnGeometry"] == "false" {
 		p.Geometry = p.Box != nil

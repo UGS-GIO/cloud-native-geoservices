@@ -90,7 +90,10 @@
    "reason": "These layers are AGOL views of static data; that describes the hosting."},
   {"match": [
    "*/count: extent (missing)"],
-   "reason": "For where=1=1 these layers answer returnCountOnly from cached estimates, which include an extent."}
+   "reason": "For where=1=1 these layers answer returnCountOnly from cached estimates, which include an extent."},
+  {"match": [
+   "*/count-extent-envelope: *"],
+   "reason": "AGOL gives up on this count and extent after 55 s with a 400, so it is not a reference; a local check with DuckDB over the copy agrees with our answer."}
  ],
  "known": [
   {"match": [

@@ -54,6 +54,7 @@
 {"name": "extent-where", "params": {"f": "json", "where": "{where}", "returnExtentOnly": "true"}},
 {"name": "extent-3857", "params": {"f": "json", "where": "{where}", "returnExtentOnly": "true", "outSR": "3857"}},
 {"name": "count-extent", "params": {"f": "json", "where": "{where}", "returnCountOnly": "true", "returnExtentOnly": "true"}},
+{"name": "count-extent-envelope", "params": {"f": "json", "where": "{where}", "geometry": "-179.9,-85,179.9,85", "geometryType": "esriGeometryEnvelope", "inSR": "4326", "returnCountOnly": "true", "returnExtentOnly": "true"}},
 {"name": "geojson", "params": {"f": "geojson", "objectIds": "{ids}", "outFields": "*"}},
 {"name": "geojson-subset", "params": {"f": "geojson", "objectIds": "{ids}", "outFields": "{str}"}},
 {"name": "geojson-count", "params": {"f": "geojson", "where": "1=1", "returnCountOnly": "true"}},
