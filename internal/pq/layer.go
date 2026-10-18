@@ -82,8 +82,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	if err != nil {
 		return nil, err
 	}
-	pf, err := parquet.OpenFile(f, f.Size, parquet.SkipPageIndex(true), parquet.SkipBloomFilters(true),
-		parquet.ReadBufferSize(256<<10))
+	// The footer's own magic is still checked; the header's would cost a request of its own.
+	pf, err := parquet.OpenFile(f, f.Size, parquet.SkipMagicBytes(true), parquet.SkipPageIndex(true),
+		parquet.SkipBloomFilters(true), parquet.ReadBufferSize(256<<10))
 	if err != nil {
 		return nil, err
 	}
