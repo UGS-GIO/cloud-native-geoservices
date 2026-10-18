@@ -299,18 +299,37 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 	return err
 }
 
-// settle drops the rows whose bbox misses the filter and marks those whose bbox meets it.
+// settle drops the rows whose bbox misses the filter and marks those whose bbox meets it. A row
+// in pages whose bounds the filter covers is marked without reading its bbox.
 func settle(ctx context.Context, source *pq.Layer, spatial *query.Spatial, rows []int64) ([]int64, []bool, error) {
-	bbox, err := source.Read(ctx, pq.BBox, rows)
+	covered, err := source.Covered(ctx, rows, func(b [4]float64) bool {
+		return spatial.Covers(orb.Bound{Min: orb.Point{b[0], b[1]}, Max: orb.Point{b[2], b[3]}})
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	var rest []int64
+	for i, r := range rows {
+		if !covered[i] {
+			rest = append(rest, r)
+		}
+	}
+	bbox, err := source.Read(ctx, pq.BBox, rest)
 	if err != nil {
 		return nil, nil, err
 	}
 	keep, known := rows[:0:0], []bool{}
+	j := -1
 	for i, r := range rows {
+		if covered[i] {
+			keep, known = append(keep, r), append(known, true)
+			continue
+		}
+		j++
 		var b [4]float64
 		ok := true
 		for k := range b {
-			if b[k], ok = bbox.Get(k, i).(float64); !ok {
+			if b[k], ok = bbox.Get(k, j).(float64); !ok {
 				break
 			}
 		}

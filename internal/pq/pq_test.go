@@ -128,8 +128,8 @@ func TestInBoxPages(t *testing.T) {
 		}
 		return *p
 	}
-	pruned := false
-	for _, box := range [][4]float64{{-3, -2, -2.5, 4}, {-1, -1, 1, 1}, {9.9, -10, 11, 10}, {-20, -20, 20, 20}, {5, 20, 6, 30}} {
+	pruned, sure, covers := false, false, false
+	for _, box := range [][4]float64{{-3, -2, -2.5, 4}, {-1, -1, 1, 1}, {9.9, -10, 11, 10}, {-20, -20, 20, 20}, {5, 20, 6, 30}, {9, -10.5, 11, 10.5}} {
 		got, err := l.Select(context.Background(), Selection{Box: &box})
 		if err != nil {
 			t.Fatal(err)
@@ -142,15 +142,33 @@ func TestInBoxPages(t *testing.T) {
 					want = append(want, i)
 				}
 			}
-			if rel, _ := l.candidates(context.Background(), g, &box); rel != nil {
-				pruned = true
+			segs, _ := l.segments(context.Background(), g)
+			for _, sg := range segs {
+				pruned, sure = pruned || !sg.meets(&box), sure || sg.within(&box)
 			}
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("box %v: %d rows, want %d", box, len(got), len(want))
 		}
+		// A covered row's bbox lies in the box.
+		all := l.AllRows()
+		in := func(b [4]float64) bool { return b[0] >= box[0] && b[1] >= box[1] && b[2] <= box[2] && b[3] <= box[3] }
+		covered, err := l.Covered(context.Background(), all, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, c := range covered {
+			r := rows[i]
+			if c && (r.Xmin == nil || !in([4]float64{*r.Xmin, *r.Ymin, *r.Xmax, *r.Ymax})) {
+				t.Fatalf("box %v: row %d covered", box, i)
+			}
+			covers = covers || c
+		}
 	}
-	if !pruned {
-		t.Error("the page index pruned nothing")
+	if pages, _, _ := l.want(context.Background(), l.leaves["bbox_xmin"], 0, []int64{}); pages == nil {
+		t.Error("no rows read the whole chunk")
+	}
+	if !pruned || !sure || !covers {
+		t.Error("the page index pruned nothing", pruned, sure, covers)
 	}
 }

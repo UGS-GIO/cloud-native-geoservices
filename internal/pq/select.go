@@ -113,13 +113,33 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 		return nil, err
 	}
 	var spans []rgSpan
+	var sure [][][2]int64
 	for _, g := range groups {
-		rel, err := l.candidates(ctx, g, box)
+		segs, err := l.segments(ctx, g)
 		if err != nil {
 			return nil, err
 		}
-		if rel == nil || len(rel) > 0 {
-			spans = append(spans, rgSpan{g: g, rel: rel})
+		if segs == nil {
+			spans, sure = append(spans, rgSpan{g: g}), append(sure, nil)
+			continue
+		}
+		// Rows of a segment that meets the box for sure are hits unread; the rest that may, read.
+		rel, in := []int64{}, [][2]int64(nil)
+		for _, sg := range segs {
+			switch {
+			case sg.within(box):
+				in = append(in, [2]int64{sg.from, sg.to})
+			case sg.meets(box):
+				for i := sg.from; i < sg.to; i++ {
+					rel = append(rel, i)
+				}
+			}
+		}
+		if len(in) == 0 && int64(len(rel)) == l.Groups[g].Rows {
+			rel = nil
+		}
+		if rel == nil || len(rel) > 0 || len(in) > 0 {
+			spans, sure = append(spans, rgSpan{g: g, rel: rel}), append(sure, in)
 		}
 	}
 	if err := l.prefetch(ctx, l.bboxLeaves(), spans); err != nil {
@@ -128,6 +148,15 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 	hits := make([][]int64, len(spans))
 	eg, ectx := errgroup.WithContext(ctx)
 	for k, sp := range spans {
+		start := l.Groups[sp.g].Start
+		for _, r := range sure[k] {
+			for i := r[0]; i < r[1]; i++ {
+				hits[k] = append(hits[k], start+i)
+			}
+		}
+		if sp.rel != nil && len(sp.rel) == 0 {
+			continue
+		}
 		eg.Go(func() error {
 			var cols [4]cursor
 			for c, name := range BBox {
@@ -137,7 +166,6 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 				}
 				cols[c].runs = rs
 			}
-			start := l.Groups[sp.g].Start
 			test := func(i int64) {
 				if cols[2].at(i) >= box[0] && cols[0].at(i) <= box[2] && cols[3].at(i) >= box[1] && cols[1].at(i) <= box[3] {
 					hits[k] = append(hits[k], start+i)
@@ -157,14 +185,22 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 	if err := eg.Wait(); err != nil {
 		return nil, err
 	}
-	return slices.Concat(hits...), nil
+	return slices.Concat(hits...), nil // Select sorts them
 }
 
-// candidates is the sorted rows of row group g in a page of every bbox column whose bounds could
-// meet box, a null counting as 0 as at reads it; nil when the page index rules out no row.
-func (l *Layer) candidates(ctx context.Context, g int, box *[4]float64) ([]int64, error) {
-	rows := l.Groups[g].Rows
-	keep := [][2]int64{{0, rows}}
+// segment is the rows [from, to) of a row group that lie in one page of each bbox column, and
+// what the column index says of those pages, by column.
+type segment struct {
+	from, to int64
+	lo, hi   [4]float64 // NaN where unknown
+	nulls    [4]bool    // may hold a null
+	values   [4]bool    // may hold a value
+}
+
+// segments splits row group g at the page boundaries of every bbox column; nil when a column
+// has no page index.
+func (l *Layer) segments(ctx context.Context, g int) ([]segment, error) {
+	segs := []segment{{from: 0, to: l.Groups[g].Rows}}
 	for c, lf := range l.bboxLeaves() {
 		if l.chunkMeta(lf, g).OffsetIndexOffset == 0 {
 			return nil, nil
@@ -178,48 +214,101 @@ func (l *Layer) candidates(ctx context.Context, g int, box *[4]float64) ([]int64
 			return nil, err
 		}
 		t := l.chunkMeta(lf, g).MetaData.Type
-		var pass [][2]int64
-		for p, pg := range lay.pages {
-			// The xmin and ymin columns must reach down to the box's max; xmax and ymax up to its min.
-			meets := func(v float64) bool { return v <= box[c+2] }
-			bound := ci.MinValues[p]
-			if c >= 2 {
-				meets, bound = func(v float64) bool { return v >= box[c-2] }, ci.MaxValues[p]
+		var out []segment
+		for i, p := 0, 0; i < len(segs) && p < len(lay.pages); {
+			sg, pg := segs[i], lay.pages[p]
+			if from, to := max(sg.from, pg.first), min(sg.to, pg.first+pg.rows); from < to {
+				sg.from, sg.to = from, to
+				sg.lo[c], sg.hi[c] = number(t, ci.MinValues[p]), number(t, ci.MaxValues[p])
+				sg.nulls[c] = ci.NullPages[p] || len(ci.NullCounts) == 0 || ci.NullCounts[p] > 0
+				sg.values[c] = !ci.NullPages[p]
+				out = append(out, sg)
 			}
-			nulls := ci.NullPages[p] || len(ci.NullCounts) == 0 || ci.NullCounts[p] > 0
-			v := number(t, bound)
-			if (nulls && meets(0)) || (!ci.NullPages[p] && (math.IsNaN(v) || meets(v))) {
-				pass = append(pass, [2]int64{pg.first, pg.first + pg.rows})
+			if segs[i].to < pg.first+pg.rows {
+				i++
+			} else {
+				p++
 			}
 		}
-		keep = intersect(keep, pass)
+		segs = out
 	}
-	if len(keep) == 1 && keep[0] == [2]int64{0, rows} {
-		return nil, nil
+	return segs, nil
+}
+
+// test is whether value v of bbox column c meets box: xmin and ymin reach down to the box's
+// max, xmax and ymax up to its min.
+func test(c int, v float64, box *[4]float64) bool {
+	if c < 2 {
+		return v <= box[c+2]
 	}
-	out := []int64{}
-	for _, r := range keep {
-		for i := r[0]; i < r[1]; i++ {
-			out = append(out, i)
+	return v >= box[c-2]
+}
+
+// meets reports whether a row of s may meet box, a null counting as 0 as at reads it.
+func (s *segment) meets(box *[4]float64) bool {
+	for c := range 4 {
+		bound := s.lo[c]
+		if c >= 2 {
+			bound = s.hi[c]
+		}
+		if !(s.nulls[c] && test(c, 0, box)) && !(s.values[c] && (math.IsNaN(bound) || test(c, bound, box))) {
+			return false
+		}
+	}
+	return true
+}
+
+// within reports whether every row of s meets box.
+func (s *segment) within(box *[4]float64) bool {
+	for c := range 4 {
+		bound := s.hi[c]
+		if c >= 2 {
+			bound = s.lo[c]
+		}
+		if s.nulls[c] || !test(c, bound, box) {
+			return false
+		}
+	}
+	return true
+}
+
+// bound is a box holding every row's bbox, when no value is null or unknown.
+func (s *segment) bound() ([4]float64, bool) {
+	b := [4]float64{s.lo[0], s.lo[1], s.hi[2], s.hi[3]}
+	for c := range 4 {
+		if s.nulls[c] || math.IsNaN(b[c]) {
+			return b, false
+		}
+	}
+	return b, true
+}
+
+// Covered reports, for each of the sorted rows, whether the page index bounds its bbox by a box
+// inside accepts, so its bbox need not be read.
+func (l *Layer) Covered(ctx context.Context, rows []int64, inside func([4]float64) bool) ([]bool, error) {
+	out := make([]bool, len(rows))
+	spans, err := l.spans(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, sp := range spans {
+		segs, err := l.segments(ctx, sp.g)
+		if err != nil {
+			return nil, err
+		}
+		k, last, ok := 0, -1, false
+		for i, r := range sp.rel {
+			for segs != nil && segs[k].to <= r {
+				k++
+			}
+			if segs != nil && k != last {
+				b, known := segs[k].bound()
+				last, ok = k, known && inside(b)
+			}
+			out[sp.from+i] = ok
 		}
 	}
 	return out, nil
-}
-
-// intersect is the rows in both sorted lists of [start, end) ranges.
-func intersect(a, b [][2]int64) [][2]int64 {
-	var out [][2]int64
-	for i, j := 0, 0; i < len(a) && j < len(b); {
-		if lo, hi := max(a[i][0], b[j][0]), min(a[i][1], b[j][1]); lo < hi {
-			out = append(out, [2]int64{lo, hi})
-		}
-		if a[i][1] < b[j][1] {
-			i++
-		} else {
-			j++
-		}
-	}
-	return out
 }
 
 // cursor reads a column's runs at increasing rows.

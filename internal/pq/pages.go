@@ -64,6 +64,9 @@ func (l *Layer) want(ctx context.Context, lf leaf, g int, rel []int64) ([]int, *
 	if lf.kind != KindBytes && len(pages) == len(lay.pages) {
 		return nil, lay, nil
 	}
+	if pages == nil {
+		pages = []int{} // no row wanted is no page, not the whole chunk
+	}
 	return pages, lay, nil
 }
 
