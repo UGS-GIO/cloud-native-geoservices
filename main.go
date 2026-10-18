@@ -26,6 +26,7 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/remote"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/server"
 )
 
@@ -123,6 +124,7 @@ func main() {
 		os.Exit(2)
 	}
 	cat := catalog.New(src, time.Duration(ttl)*time.Second)
+	cat.HTTP.Transport = remote.Transport
 	prov := &provider.Provider{
 		Catalog: cat,
 		Reader: pq.NewReader(budget("PAGE_CACHE_MB", 128, 0.03, limit),
