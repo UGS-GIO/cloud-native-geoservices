@@ -166,7 +166,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		return nil, query.Bad(err.Error())
 	}
 	// Small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
-	// than the request (vector/sink_archive.py).
+	// than the request (an `overview` asset).
 	source := layer
 	if ov := overview(item, p.Tolerance); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
 		if source, err = pr.Open(ctx, ov); err != nil {

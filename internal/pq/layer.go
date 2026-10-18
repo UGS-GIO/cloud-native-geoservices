@@ -2,7 +2,7 @@
 //
 // Row groups are pruned on the bbox covering columns' statistics; inside a row group, the small
 // bbox columns pick the matching rows, and where the file has a page index only the pages holding
-// them are fetched (the warehouse writes ~100-row pages; vector/sink_archive.py). Decoded values
+// them are fetched (small pages, ~100 rows, read best). Decoded values
 // stay in a cache per file, column and row group (or page), so a warm request skips zstd and
 // parquet decoding.
 package pq
