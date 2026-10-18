@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/paulmach/orb"
-	"github.com/paulmach/orb/project"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
@@ -161,6 +160,7 @@ type winnow struct {
 	outSR      SpatialRef
 	geometry   bool // returnGeometry
 	precision  *int
+	project    func(orb.Point) orb.Point // outGeometry's, once worked out
 	aggregates []aggregate
 	groupBy    []string
 }
@@ -343,21 +343,27 @@ func (w *winnow) idMatch(ft *Feature) bool {
 
 // outGeometry projects and rounds a feature's geometry for output.
 func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
-	if g == nil {
-		return nil
+	if g == nil || !w.toMercator && w.precision == nil {
+		return g
 	}
-	// g may be a cached shape: project.Geometry works in place, so it gets one copy.
-	if w.toMercator || w.precision != nil {
-		g = orb.Clone(g)
+	if w.project == nil {
+		w.project = w.outPoint
+		if w.toMercator && w.precision == nil {
+			w.project = geom.ToMercator
+		}
 	}
+	// g may be a cached shape, so it is projected into a copy.
+	return geom.Projected(g, w.project)
+}
+
+func (w *winnow) outPoint(p orb.Point) orb.Point {
 	if w.toMercator {
-		g = project.Geometry(g, geom.ToMercator)
+		p = geom.ToMercator(p)
 	}
 	if w.precision != nil {
-		d := *w.precision
-		g = project.Geometry(g, func(p orb.Point) orb.Point { return orb.Point{toFixed(p[0], d), toFixed(p[1], d)} })
+		p = orb.Point{toFixed(p[0], *w.precision), toFixed(p[1], *w.precision)}
 	}
-	return g
+	return p
 }
 
 func toFixed(f float64, d int) float64 {
