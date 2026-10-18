@@ -209,7 +209,8 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if g, ok := p["geometry"]; ok {
 		rel, _ := p.String("spatialRel")
 		var err error
-		if w.spatial, err = newSpatial(g, p["inSR"], rel); err != nil {
+		units, _ := p.String("units")
+		if w.spatial, err = newSpatial(g, p["inSR"], rel, p["distance"], units); err != nil {
 			return nil, err
 		}
 	}

@@ -104,13 +104,6 @@
    "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
   {"match": [
-   "*/count-point-distance: count (value)"],
-   "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},
-  {"match": [
-   "*/count-point-json-distance: count (value)",
-   "*/count-point-meters: count (value)"],
-   "reason": "distance and units only widen the row-group prefilter; the exact test uses the bare point."},
-  {"match": [
    "*/error-where-field: error (missing)",
    "*/error-where-field: count (extra)",
    "*/error-outfields: *",

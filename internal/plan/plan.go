@@ -94,12 +94,16 @@ func WkidOf(v any) int {
 
 func isTrue(v string) bool { return v == "true" }
 
-// bboxOf is any Esri geometry (or "xmin,ymin,xmax,ymax") as [xmin, ymin, xmax, ymax] in its SR.
+// bboxOf is any Esri geometry (or "xmin,ymin,xmax,ymax", or "x,y") as [xmin, ymin, xmax, ymax]
+// in its SR.
 func bboxOf(geometry string) ([4]float64, map[string]any, bool) {
 	g := parseJSON(geometry)
 	switch x := g.(type) {
 	case string:
 		parts := strings.Split(x, ",")
+		if len(parts) == 2 {
+			parts = append(parts, parts...)
+		}
 		if len(parts) != 4 {
 			return [4]float64{}, nil, false
 		}
@@ -145,9 +149,6 @@ func bboxOf(geometry string) ([4]float64, map[string]any, bool) {
 
 func asList(v any) []any { l, _ := v.([]any); return l }
 
-var meters = map[string]float64{"esriSRUnit_Meter": 1, "esriSRUnit_Kilometer": 1000, "esriSRUnit_Foot": 0.3048,
-	"esriSRUnit_StatuteMile": 1609.344, "esriSRUnit_NauticalMile": 1852}
-
 // FilterBox is the request's spatial filter as a lon/lat box, grown by `distance` when given.
 func FilterBox(params map[string]string) *[4]float64 {
 	g, ok := params["geometry"]
@@ -176,15 +177,10 @@ func FilterBox(params map[string]string) *[4]float64 {
 	} else if wkid != 4326 && wkid != 4269 {
 		return nil // an SR we don't project: no prefilter, the exact test still filters
 	}
-	unit, ok := meters[params["units"]]
-	if !ok {
-		unit = 1
+	if d := js.ParseNumber(params["distance"]); d > 0 {
+		box = geom.Pad(box, geom.Meters(d, params["units"]))
 	}
-	pad := 0.0
-	if d := params["distance"]; d != "" {
-		pad = js.ParseNumber(d) * unit / 111320
-	}
-	return &[4]float64{box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad}
+	return &box
 }
 
 var trivial = regexp.MustCompile(`(?i)^\s*(1\s*=\s*1)?\s*$`)
@@ -214,7 +210,7 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	simple := TrivialWhere(params)
 	p.OutSR = WkidOf(params["outSR"])
 	countOnly, extentOnly := isTrue(params["returnCountOnly"]), isTrue(params["returnExtentOnly"])
-	if simple && p.Box == nil && len(p.IDs) == 0 && (countOnly || extentOnly) {
+	if simple && params["geometry"] == "" && len(p.IDs) == 0 && (countOnly || extentOnly) {
 		p.Kind = Count
 		if extentOnly {
 			p.Kind = Extent

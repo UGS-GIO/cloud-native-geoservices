@@ -4,21 +4,28 @@ import (
 	"github.com/paulmach/orb"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
 )
 
-// Spatial is a request's geometry filter: the query geometry, prepared, and its spatialRel.
+// Spatial is a request's geometry filter: the query geometry, prepared, and its spatialRel. With
+// a distance, an intersects-like relation is being within the distance of the geometry.
 type Spatial struct {
-	q   *geom.Prepared
-	rel string
+	q    *geom.Prepared
+	rel  string
+	near *geom.Near
 }
 
 // newSpatial reads the filter; nil when the request has none.
-func newSpatial(geometry, inSR any, rel string) (*Spatial, error) {
+func newSpatial(geometry, inSR any, rel string, distance any, units string) (*Spatial, error) {
 	g, err := filterGeometry(geometry, inSR)
 	if g == nil || err != nil {
 		return nil, err
 	}
-	return &Spatial{geom.Prepare(g), rel}, nil
+	s := &Spatial{q: geom.Prepare(g), rel: rel}
+	if d := js.Number(distance); d > 0 && rel != "esriSpatialRelContains" && rel != "esriSpatialRelWithin" {
+		s.near = geom.NewNear(g, geom.Meters(d, units))
+	}
+	return s, nil
 }
 
 // Spatial is the request's geometry filter, read as Run reads it.
@@ -32,11 +39,18 @@ func (r Raw) Spatial() (*Spatial, error) {
 		inSR = coerce(s)
 	}
 	rel, _ := coerce(r["spatialRel"]).(string)
-	return newSpatial(coerce(g), inSR, rel)
+	var distance any
+	if d := r["distance"]; d != "" {
+		distance = coerce(d)
+	}
+	return newSpatial(coerce(g), inSR, rel, distance, r["units"])
 }
 
 // Decide answers for a feature from its bbox alone when that settles it.
 func (s *Spatial) Decide(b orb.Bound) (pass, sure bool) {
+	if s.near != nil {
+		return false, !b.Intersects(s.near.Bound)
+	}
 	switch s.rel {
 	case "esriSpatialRelEnvelopeIntersects":
 		return b.Intersects(s.q.Bound), true
@@ -65,6 +79,9 @@ func (s *Spatial) Covers(b orb.Bound) bool {
 func (s *Spatial) Match(g orb.Geometry) bool {
 	if g == nil {
 		return false
+	}
+	if s.near != nil {
+		return s.near.Match(g)
 	}
 	if pass, sure := s.Decide(geom.Bounds(g)); sure {
 		return pass
