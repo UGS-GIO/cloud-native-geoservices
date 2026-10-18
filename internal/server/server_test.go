@@ -172,7 +172,7 @@ func TestCancelledOpenDoesNotFailWaiters(t *testing.T) {
 }
 
 // A POST's query string and form body resolve to one value per parameter for the plan, the limits
-// and the filters alike (the query string wins, as in Koop).
+// and the filters alike (the query string wins).
 func TestPostParameterPrecedence(t *testing.T) {
 	ts := fixture(t)
 	post := func(query, form string) map[string]any {
@@ -192,5 +192,27 @@ func TestPostParameterPrecedence(t *testing.T) {
 	long := url.QueryEscape("feature_id IN (" + strings.Repeat("1,", 60) + "1)")
 	if b := post("where="+long+"&f=json", "where=1%3D1"); errorCode(b) != 400 {
 		t.Errorf("a long where in the query string passed the limit: %v", b)
+	}
+}
+
+// spatialRel reads as "query geometry <rel> feature", as ArcGIS Server does: a polygon around
+// point features Contains them, and is never Within one.
+func TestSpatialRelDirection(t *testing.T) {
+	ts := fixture(t)
+	polygon := url.QueryEscape(`{"rings":[[[-114,37],[-109,37],[-109,42],[-114,42],[-114,37]]],"spatialReference":{"wkid":4326}}`)
+	count := func(rel string) any {
+		_, b := get(t, ts.URL+"/ugs/rest/services/wells/by-purpose/FeatureServer/0/query?geometryType=esriGeometryPolygon&inSR=4326"+
+			"&returnCountOnly=true&f=json&spatialRel="+rel+"&geometry="+polygon)
+		return b["count"]
+	}
+	intersects := count("esriSpatialRelIntersects")
+	if n, _ := intersects.(float64); n == 0 {
+		t.Fatalf("no points inside the polygon: %v", intersects)
+	}
+	if c := count("esriSpatialRelContains"); c != intersects {
+		t.Errorf("Contains %v, want every point inside (%v)", c, intersects)
+	}
+	if w := count("esriSpatialRelWithin"); w != 0.0 {
+		t.Errorf("Within %v, want 0: a polygon is not within a point", w)
 	}
 }
