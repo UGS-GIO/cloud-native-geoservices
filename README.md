@@ -186,7 +186,8 @@ gh release create conformance-data --title "Conformance data" --notes "Large con
 gh release upload conformance-data conformance-large.tar.gz --clobber
 ```
 
-`-skip-extract` records the answers again and keeps the copies.
+`-skip-extract` records the answers again and keeps the copies. `-names a,b` records only
+those requests into the existing recordings.
 
 ## Development
 

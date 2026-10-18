@@ -108,6 +108,7 @@ func main() {
 	out := flag.String("out", "", "output directory (small: testdata/conformance/layers)")
 	only := flag.String("only", "", "comma-separated layer names")
 	skipExtract := flag.Bool("skip-extract", false, "re-record responses, keep the data files")
+	add := flag.String("names", "", "comma-separated request names to record into the existing recordings (implies -skip-extract)")
 	gap := flag.Duration("gap", 250*time.Millisecond, "pause between requests")
 	flag.Parse()
 
@@ -143,7 +144,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if !*skipExtract {
+		if !*skipExtract && *add == "" {
 			start := time.Now()
 			n, err := extract(ctx, c, l.URL, meta, conformance.DataPath(*out, l.Name))
 			if err != nil {
@@ -151,7 +152,7 @@ func main() {
 			}
 			log.Printf("%s: %d features in %s", l.Name, n, time.Since(start).Round(time.Second))
 		}
-		if err := record(ctx, c, l, meta, requests, conformance.RecordingPath(*out, l.Name)); err != nil {
+		if err := record(ctx, c, l, meta, requests, *add, conformance.RecordingPath(*out, l.Name)); err != nil {
 			log.Fatalf("%s: %v", l.Name, err)
 		}
 	}
@@ -243,14 +244,28 @@ func mercator(lon, lat float64) (float64, float64) {
 	return r * lon * math.Pi / 180, r * math.Log(math.Tan(math.Pi/4+lat*math.Pi/360))
 }
 
-// record asks the reference layer each request and writes the answers.
-func record(ctx context.Context, c *client, l conformance.Layer, m *meta, requests []conformance.Request, path string) error {
+// record asks the reference layer each request and writes the answers. With names set it asks
+// only those and keeps the other answers already recorded at path.
+func record(ctx context.Context, c *client, l conformance.Layer, m *meta, requests []conformance.Request, names, path string) error {
 	vars, err := derived(ctx, c, l, m)
 	if err != nil {
 		return err
 	}
 	rec := conformance.Recording{Layer: l, Recorded: time.Now().UTC().Format(time.RFC3339)}
+	var old conformance.Recording
+	if names != "" {
+		if err := conformance.ReadJSON(path, &old); err != nil {
+			return err
+		}
+		rec.Recorded = old.Recorded
+	}
 	for _, tmpl := range requests {
+		if names != "" && !slices.Contains(strings.Split(names, ","), tmpl.Name) {
+			if i := slices.IndexFunc(old.Responses, func(r conformance.Response) bool { return r.Name == tmpl.Name }); i >= 0 {
+				rec.Responses = append(rec.Responses, old.Responses[i])
+			}
+			continue
+		}
 		req, ok := conformance.Fill(tmpl, vars)
 		if !ok {
 			continue
