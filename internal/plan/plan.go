@@ -257,11 +257,17 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 			p.Columns = append(p.Columns, c.Name)
 		}
 	}
+	// An extent comes from the covering, so it reads no geometry and is not capped by it.
+	if extentOnly && layer.BBox {
+		p.Columns = append(p.Columns, pq.BBox...)
+	}
 
 	// Anything under a spatial filter still needs geometry, for the exact test; the response
 	// leaves it out when returnGeometry is false. Statistics return none, so without a filter they
 	// read none and cover the whole layer, not the rows a geometry read is capped at.
-	if idsOnly || countOnly || stats || params["returnGeometry"] == "false" {
+	if extentOnly && !layer.BBox {
+		p.Geometry = true
+	} else if idsOnly || countOnly || stats || extentOnly || params["returnGeometry"] == "false" {
 		p.Geometry = p.Box != nil
 	} else {
 		p.Geometry = true

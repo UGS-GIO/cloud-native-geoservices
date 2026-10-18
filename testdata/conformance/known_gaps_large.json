@@ -94,22 +94,12 @@
  ],
  "known": [
   {"match": [
-   "rail_lines/extent-where: extent.* (value)",
-   "rail_lines/extent-3857: extent.* (value)"],
-   "reason": "returnExtentOnly with a where whose matches span more than MAX_GEOMETRY_ROWS (50000) rows gives the extent of only part of them, not an error."},
-  {"match": [
    "*/features-where: features (length)",
    "*/features-where: features[] (extra)",
    "*/features-where: exceededTransferLimit (missing)",
    "*/distinct-two: features (length)",
    "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
-  {"match": [
-   "*/count-extent: extent.xmin (value)",
-   "*/count-extent: extent.ymin (value)",
-   "*/count-extent: extent.xmax (value)",
-   "*/count-extent: extent.ymax (value)"],
-   "reason": "returnCountOnly with returnExtentOnly gives the count and a null extent. The JS API's queryExtent() sends both, so zoom to features fails."},
   {"match": [
    "*/count-point-distance: count (value)"],
    "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},

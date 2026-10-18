@@ -84,12 +84,6 @@
  ],
  "known": [
   {"match": [
-   "*/count-extent: extent.xmin (value)",
-   "*/count-extent: extent.ymin (value)",
-   "*/count-extent: extent.xmax (value)",
-   "*/count-extent: extent.ymax (value)"],
-   "reason": "returnCountOnly with returnExtentOnly gives the count and a null extent. The JS API's queryExtent() sends both, so zoom to features fails."},
-  {"match": [
    "*/count-point-distance: count (value)"],
    "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},
   {"match": [

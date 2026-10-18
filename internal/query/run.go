@@ -12,6 +12,7 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/where"
 )
 
@@ -87,7 +88,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 	idx := w.filter()
 	if c.Next != nil {
 		// An unpaged count needs no rows kept, only tallied.
-		tally := p.True("returnCountOnly") && w.limit == 0
+		tally := p.True("returnCountOnly") && !p.True("returnExtentOnly") && w.limit == 0
 		var n int64
 		if idx, n, err = w.drain(idx, tally); err != nil {
 			return nil, err
@@ -111,7 +112,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 			o.Set("count", n)
 		}
 		if p.True("returnExtentOnly") {
-			o.Set("extent", w.extentOf(feats))
+			o.Set("extent", w.extentOf(idx))
 		}
 		return &Response{JSON: o, Count: &n}, nil
 	}
@@ -462,21 +463,36 @@ func (w *winnow) geojson(idx []int) []any {
 	return out
 }
 
-// extentOf is esri-extent over output features.
-func (w *winnow) extentOf(fs []EsriFeature) jsonx.Obj {
+// extentOf covers the selected features: from the bbox covering columns when the provider read
+// them, else from their geometry.
+func (w *winnow) extentOf(idx []int) jsonx.Obj {
 	b := geom.Bounds(nil)
-	for _, f := range fs {
-		if f.Geom == nil {
+	cols := make([]int, len(pq.BBox))
+	for k, name := range pq.BBox {
+		cols[k] = w.c.propIndex(name)
+	}
+	for _, i := range idx {
+		ft := &w.c.Features[i]
+		if cols[0] < 0 {
+			if ft.Geom != nil {
+				b = b.Union(geom.Bounds(ft.Geom))
+			}
 			continue
 		}
-		if f.Geom.Kind == geom.EsriPoint {
-			b = b.Extend(orb.Point{f.Geom.X, f.Geom.Y})
-		}
-		for _, part := range f.Geom.Parts {
-			for _, pt := range part {
-				b = b.Extend(pt)
+		var v [4]float64
+		ok := true
+		for k, c := range cols {
+			if v[k], ok = ft.Props[c].(float64); !ok {
+				break
 			}
 		}
+		if ok {
+			b = b.Union(orb.Bound{Min: orb.Point{v[0], v[1]}, Max: orb.Point{v[2], v[3]}})
+		}
+	}
+	if w.toMercator && b.Min[0] <= b.Max[0] {
+		b.Min[0], b.Min[1] = geom.ExtentToMercator(b.Min[0], b.Min[1])
+		b.Max[0], b.Max[1] = geom.ExtentToMercator(b.Max[0], b.Max[1])
 	}
 	return Extent(jsonx.Obj{{K: "wkid", V: w.outSR.Wkid}}, b.Min[0], b.Min[1], b.Max[0], b.Max[1])
 }
