@@ -151,7 +151,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	meta := &esri.Metadata{Name: name, Description: item.Description, IDField: "feature_id",
 		GeometryType: layer.GeometryType, Fields: layer.Columns, Extent: layer.Extent,
 		MaxRecordCount: int(pr.MaxRecords), Renderer: style["renderer"], LabelingInfo: style["labelingInfo"],
-		MinScale: style["minScale"]}
+		MinScale: style["minScale"], MaxScale: style["maxScale"]}
 	c := &query.Collection{Meta: meta}
 	if !isQuery {
 		return c, nil

@@ -29,6 +29,7 @@ type Metadata struct {
 	Renderer       json.RawMessage
 	LabelingInfo   json.RawMessage
 	MinScale       json.RawMessage
+	MaxScale       json.RawMessage
 }
 
 // GeometryType is the Esri name for the provider's geometry type.
@@ -112,6 +113,9 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	if truthy(m.MinScale) {
 		o.Set("minScale", jsonx.Raw(m.MinScale))
 	}
+	if truthy(m.MaxScale) {
+		o.Set("maxScale", jsonx.Raw(m.MaxScale))
+	}
 	return o
 }
 
@@ -132,14 +136,17 @@ func Server(m *Metadata) jsonx.Obj {
 		o.Set("fullExtent", extent(m.Extent))
 		o.Set("initialExtent", extent(m.Extent))
 	}
-	var minScale any = 0
+	var minScale, maxScale any = 0, 0
 	if truthy(m.MinScale) {
 		minScale = jsonx.Raw(m.MinScale)
+	}
+	if truthy(m.MaxScale) {
+		maxScale = jsonx.Raw(m.MaxScale)
 	}
 	o.Set("layers", []any{jsonx.Obj{
 		{K: "id", V: 0}, {K: "name", V: m.Name}, {K: "type", V: "Feature Layer"},
 		{K: "parentLayerId", V: -1}, {K: "defaultVisibility", V: true}, {K: "subLayerIds", V: nil},
-		{K: "minScale", V: minScale}, {K: "maxScale", V: 0}, {K: "geometryType", V: GeometryType(m.GeometryType)},
+		{K: "minScale", V: minScale}, {K: "maxScale", V: maxScale}, {K: "geometryType", V: GeometryType(m.GeometryType)},
 	}})
 	return o
 }
