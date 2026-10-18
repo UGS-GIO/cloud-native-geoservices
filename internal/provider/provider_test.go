@@ -23,7 +23,7 @@ func fixture(t *testing.T) *Provider {
 	}
 	path := filepath.Join(t.TempDir(), "items.json")
 	os.WriteFile(path, []byte(strings.ReplaceAll(string(items), `"testdata/`, `"`+root+"/")), 0o644)
-	return &Provider{Catalog: catalog.New(path, time.Minute), Reader: pq.NewReader(16<<20, 16<<20, 64<<20),
+	return &Provider{Catalog: catalog.New(catalog.STAC{URL: path}, time.Minute), Reader: pq.NewReader(16<<20, 16<<20, 64<<20),
 		Shapes: geom.NewShapes(16 << 20), MaxRecords: 2000, TileMaxRecords: 5, MaxGeometryRows: 50000}
 }
 

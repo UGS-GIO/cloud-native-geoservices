@@ -32,10 +32,11 @@ func TestParseTopics(t *testing.T) {
 	 {"id":"a","properties":{"title":"A","ugs:renders":{"z":{},"b":{"esri_url":"https://x/b.json","title":"B"}}},"assets":{"data":{"href":"a.parquet"},"overview_1":{"href":"o.parquet","ugs:simplify_tolerance":0.01}}},
 	 {"id":"no-data","assets":{"thumbnail":{"href":"t.webp"}}},
 	 {"id":"c","properties":{},"assets":{"data":{"href":"c.parquet"}}}]}`
-	tp, err := parseTopics([]byte(doc))
+	items, err := parseSTAC([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
+	tp := index(items)
 	if len(tp.order) != 2 || tp.order[0].ID != "a" {
 		t.Fatalf("topics %v", tp.order)
 	}
@@ -53,7 +54,7 @@ func TestRendererVersionFollowsTheFile(t *testing.T) {
 	esri := filepath.Join(dir, "b.json")
 	items := filepath.Join(dir, "items.json")
 	os.WriteFile(items, []byte(`{"items":[{"id":"a","properties":{"ugs:renders":{"b":{"esri_url":"`+esri+`"}}},"assets":{"data":{"href":"a.parquet"}}}]}`), 0o644)
-	c := New(items, 0)
+	c := New(STAC{URL: items}, 0)
 	version := func(renderer string) string {
 		os.WriteFile(esri, []byte(`{"renderer":`+renderer+`}`), 0o644)
 		it, err := c.Topic(context.Background(), "a")
@@ -68,5 +69,52 @@ func TestRendererVersionFollowsTheFile(t *testing.T) {
 	}
 	if version(`{"type":"simple"}`) == version(`{"type":"uniqueValue"}`) {
 		t.Fatal("a republished renderer kept its version")
+	}
+}
+
+func TestFolder(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"b.parquet", "a.parquet", "notes.txt"} {
+		os.WriteFile(filepath.Join(dir, name), nil, 0o644)
+	}
+	os.Mkdir(filepath.Join(dir, "sub.parquet"), 0o755)
+	items, err := Folder{Dir: dir}.Items(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != "a" || items[0].Data() != filepath.Join(dir, "a.parquet") {
+		t.Fatalf("one topic per .parquet file, by name: %+v", items)
+	}
+	if _, err := (Folder{Dir: filepath.Join(dir, "missing")}).Items(context.Background(), nil); err == nil {
+		t.Fatal("a missing folder should be an error")
+	}
+}
+
+func TestConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layers.json")
+	os.WriteFile(path, []byte(`{"layers":[
+	 {"id":"faults","title":"Faults","url":"data/faults.parquet",
+	  "renders":[{"name":"by-age","title":"By age","esri_url":"styles/age.json"},{"name":"plain"}]},
+	 {"id":"wells","url":"https://example.com/wells.parquet"}]}`), 0o644)
+	c := New(Config{URL: path}, 0)
+	f, err := c.Topic(context.Background(), "faults")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Data() != filepath.Join(dir, "data/faults.parquet") || *f.Title != "Faults" ||
+		f.Renders[0].EsriURL != filepath.Join(dir, "styles/age.json") || f.Renders[1].Name != "plain" {
+		t.Errorf("relative urls resolve against the config file: %+v", f)
+	}
+	w, _ := c.Topic(context.Background(), "wells")
+	if w.Data() != "https://example.com/wells.parquet" || w.Renders[0].Name != "default" {
+		t.Errorf("a layer without renders is served as default: %+v", w)
+	}
+	if got := resolve("https://cdn.example.com/cfg/layers.json", "a.parquet"); got != "https://cdn.example.com/cfg/a.parquet" {
+		t.Errorf("resolve against a URL: %s", got)
+	}
+	os.WriteFile(path, []byte(`{"layers":[{"id":"x"}]}`), 0o644)
+	if _, err := (Config{URL: path}).Items(context.Background(), New(nil, 0).getBytes); err == nil {
+		t.Error("a layer without a url should be an error")
 	}
 }

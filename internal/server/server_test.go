@@ -34,7 +34,7 @@ func fixtureAt(t *testing.T, base string) *httptest.Server {
 	}
 	path := filepath.Join(t.TempDir(), "items.json")
 	os.WriteFile(path, []byte(strings.ReplaceAll(string(items), `"testdata/`, `"`+base+"/")), 0o644)
-	p := &provider.Provider{Catalog: catalog.New(path, time.Minute), Reader: pq.NewReader(32<<20, 64<<20, 64<<20),
+	p := &provider.Provider{Catalog: catalog.New(catalog.STAC{URL: path}, time.Minute), Reader: pq.NewReader(32<<20, 64<<20, 64<<20),
 		Shapes: geom.NewShapes(16 << 20), MaxRecords: 2000, TileMaxRecords: 8000, MaxGeometryRows: 50000}
 	s := New(p, 300, "", Limits{MaxWhere: 100, MaxBody: 1024, MaxObjectIDs: 5, Timeout: 10 * time.Second,
 		MaxScans: 1, ScanWait: time.Second, MaxWork: 2, MaxLight: 4, MaxInFlight: 64, WorkWait: time.Second}, 8<<20, slog.New(slog.NewTextHandler(io.Discard, nil)))

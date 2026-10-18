@@ -1,8 +1,8 @@
-// Package catalog reads what is served and how it looks from the STAC catalog, on demand.
+// Package catalog lists what is served and how it looks, from a Source, on demand.
 //
-// A layer is a serving topic with a GeoParquet `data` asset; each of its `ugs:renders` is its own
-// FeatureServer, symbolized by the Esri renderer ugs-styles publishes beside the GL style
-// (`esri_url`). A topic with no renders is served once, as `default`, with Koop's symbol.
+// A topic is one GeoParquet file. Each of its renders is its own FeatureServer, symbolized by the
+// Esri drawing info at the render's `esri_url`. A topic with no renders is served once, as
+// `default`, with the default symbol.
 package catalog
 
 import (
@@ -10,12 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -41,14 +39,14 @@ type Asset struct {
 	Tolerance *float64 // ugs:simplify_tolerance, on overview assets
 }
 
-// Render is one entry of `ugs:renders`.
+// Render is one way to draw a topic.
 type Render struct {
-	Name    string
-	Title   *string
-	EsriURL string
+	Name    string  `json:"name"`
+	Title   *string `json:"title"`
+	EsriURL string  `json:"esri_url"`
 }
 
-// Item is a serving topic.
+// Item is a served topic.
 type Item struct {
 	ID          string
 	Title       *string // properties.title, when set
@@ -68,11 +66,11 @@ func (it *Item) Data() string {
 	return ""
 }
 
-// Catalog fetches and caches the collection and the renderers it points to.
+// Catalog caches the topics a Source lists and the renderers they point to.
 type Catalog struct {
-	URL   string
-	Cache *TTL
-	HTTP  *http.Client
+	Source Source
+	Cache  *TTL
+	HTTP   *http.Client
 }
 
 type topics struct {
@@ -80,9 +78,9 @@ type topics struct {
 	byID  map[string]*Item
 }
 
-// New makes a catalog over the collection at url (https or a local file).
-func New(url string, ttl time.Duration) *Catalog {
-	return &Catalog{URL: url, Cache: NewTTL(ttl), HTTP: &http.Client{Timeout: 10 * time.Second}}
+// New makes a catalog over src.
+func New(src Source, ttl time.Duration) *Catalog {
+	return &Catalog{Source: src, Cache: NewTTL(ttl), HTTP: &http.Client{Timeout: 10 * time.Second}}
 }
 
 // Topics lists every served topic, in collection order.
@@ -96,11 +94,11 @@ func (c *Catalog) Topics(ctx context.Context) ([]*Item, error) {
 
 func (c *Catalog) topics(ctx context.Context) (*topics, error) {
 	v, err := c.Cache.Get("topics", func() (any, error) {
-		raw, err := c.getBytes(ctx, c.URL)
+		items, err := c.Source.Items(ctx, c.getBytes)
 		if err != nil {
 			return nil, err
 		}
-		return parseTopics(raw)
+		return index(items), nil
 	})
 	if err != nil {
 		return nil, err
@@ -154,9 +152,7 @@ func (c *Catalog) Drawing(ctx context.Context, it *Item, name string) (*Drawing,
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			return nil, err
 		}
-		h := fnv.New64a()
-		h.Write(raw)
-		return &Drawing{doc, strconv.FormatUint(h.Sum64(), 36)}, nil
+		return &Drawing{doc, hash(raw)}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -164,9 +160,9 @@ func (c *Catalog) Drawing(ctx context.Context, it *Item, name string) (*Drawing,
 	return v.(*Drawing), nil
 }
 
-// GetBytes reads a URL or local file.
+// getBytes reads a URL or local file.
 func (c *Catalog) getBytes(ctx context.Context, url string) ([]byte, error) {
-	if !strings.HasPrefix(url, "http:") && !strings.HasPrefix(url, "https:") {
+	if !isHTTP(url) {
 		return os.ReadFile(url)
 	}
 	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), http.MethodGet, url, nil)
@@ -209,54 +205,10 @@ func ObjectFields(raw json.RawMessage) ([]Field, error) {
 	return out, nil
 }
 
-func parseTopics(raw []byte) (*topics, error) {
-	var doc struct {
-		Items []json.RawMessage `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse collection: %w", err)
-	}
+// index keeps the last item of each id, in the place of the first.
+func index(items []*Item) *topics {
 	t := &topics{byID: map[string]*Item{}}
-	for _, rawItem := range doc.Items {
-		var d struct {
-			ID         string                     `json:"id"`
-			Properties map[string]json.RawMessage `json:"properties"`
-			Assets     json.RawMessage            `json:"assets"`
-		}
-		if json.Unmarshal(rawItem, &d) != nil {
-			continue
-		}
-		h := fnv.New64a()
-		h.Write(rawItem)
-		it := &Item{ID: d.ID, Version: strconv.FormatUint(h.Sum64(), 36)}
-		assets, _ := ObjectFields(d.Assets)
-		for _, a := range assets {
-			var v struct {
-				Href      string   `json:"href"`
-				Tolerance *float64 `json:"ugs:simplify_tolerance"`
-			}
-			if json.Unmarshal(a.Value, &v) == nil {
-				it.Assets = append(it.Assets, Asset{a.Key, v.Href, v.Tolerance})
-			}
-		}
-		if it.Data() == "" {
-			continue
-		}
-		if raw := d.Properties["title"]; raw != nil {
-			_ = json.Unmarshal(raw, &it.Title)
-		}
-		if raw := d.Properties["description"]; raw != nil {
-			_ = json.Unmarshal(raw, &it.Description)
-		}
-		renders, _ := ObjectFields(d.Properties["ugs:renders"])
-		for _, r := range renders {
-			var v struct {
-				Title   *string `json:"title"`
-				EsriURL string  `json:"esri_url"`
-			}
-			_ = json.Unmarshal(r.Value, &v)
-			it.Renders = append(it.Renders, Render{r.Key, v.Title, v.EsriURL})
-		}
+	for _, it := range items {
 		if len(it.Renders) == 0 {
 			it.Renders = []Render{{Name: "default"}}
 		}
@@ -267,5 +219,5 @@ func parseTopics(raw []byte) (*topics, error) {
 		}
 		t.byID[it.ID] = it
 	}
-	return t, nil
+	return t
 }

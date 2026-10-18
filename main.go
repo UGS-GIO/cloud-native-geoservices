@@ -1,9 +1,10 @@
-// geoservices: an ArcGIS FeatureServer over the warehouse GeoParquet on the CDN (README.md).
+// geoparquet-featureserver serves GeoParquet files as ArcGIS FeatureServer layers (README.md).
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -81,6 +82,20 @@ func budget(key string, defMB int64, fraction float64, limit int64) int64 {
 	return b
 }
 
+// source is the first layer source set, or nil.
+func source() catalog.Source {
+	if u := env("STAC_COLLECTION_URL", ""); u != "" {
+		return catalog.STAC{URL: u}
+	}
+	if u := env("LAYERS_CONFIG", ""); u != "" {
+		return catalog.Config{URL: u}
+	}
+	if d := env("LAYERS_DIR", ""); d != "" {
+		return catalog.Folder{Dir: d}
+	}
+	return nil
+}
+
 func main() {
 	level := slog.LevelWarn
 	_ = level.UnmarshalText([]byte(env("LOG_LEVEL", "warn"))) // unknown names stay at warn
@@ -102,8 +117,12 @@ func main() {
 		maxInFlight = min(maxInFlight, limit>>20)
 	}
 	geometryBudget := budget("GEOMETRY_BUDGET_MB", 512, 0.125, limit)
-	cat := catalog.New(env("STAC_COLLECTION_URL",
-		"https://maps-assets.geology.utah.gov/warehouse/stac/ugs-serving-topics/items.json"), time.Duration(ttl)*time.Second)
+	src := source()
+	if src == nil {
+		log.Error("set one of STAC_COLLECTION_URL, LAYERS_CONFIG or LAYERS_DIR")
+		os.Exit(2)
+	}
+	cat := catalog.New(src, time.Duration(ttl)*time.Second)
 	prov := &provider.Provider{
 		Catalog: cat,
 		Reader: pq.NewReader(budget("PAGE_CACHE_MB", 128, 0.03, limit),
@@ -148,7 +167,7 @@ func main() {
 		defer cancel()
 		hs.Shutdown(shutdown)
 	}()
-	log.Warn("geoservices listening", "addr", hs.Addr, "memory_limit", limit)
+	log.Warn("listening", "addr", hs.Addr, "source", fmt.Sprintf("%T%+v", src, src), "memory_limit", limit)
 	ln, err := net.Listen("tcp", hs.Addr)
 	if err != nil {
 		log.Error("listen", "err", err)
