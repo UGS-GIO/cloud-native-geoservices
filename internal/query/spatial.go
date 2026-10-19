@@ -57,10 +57,7 @@ func bufferable(g orb.Geometry) bool {
 			return false
 		}
 	}
-	for range geom.Points(g) {
-		return true
-	}
-	return false
+	return !geom.Bounds(g).IsEmpty()
 }
 
 // Spatial is the request's geometry filter, read as Run reads it.
