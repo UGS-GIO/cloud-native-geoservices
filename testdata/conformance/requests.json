@@ -132,5 +132,12 @@
 {"name": "error-stats-group", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{oid}\",\"outStatisticFieldName\":\"n\"}]", "groupByFieldsForStatistics": "nosuchfield"}},
 {"name": "error-stats-type", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"median\",\"onStatisticField\":\"{num}\",\"outStatisticFieldName\":\"s\"}]"}},
 {"name": "post-count-arith", "params": {"f": "json", "where": "{arith}", "returnCountOnly": "true"}, "method": "POST"},
-{"name": "post-count-where", "params": {"f": "json", "where": "{where}", "returnCountOnly": "true"}, "method": "POST"}
+{"name": "post-count-where", "params": {"f": "json", "where": "{where}", "returnCountOnly": "true"}, "method": "POST"},
+{"name": "count-bool-case", "params": {"f": "json", "where": "1=1", "returnCountOnly": "True"}},
+{"name": "count-f-case", "params": {"f": "JSON", "where": "{where}", "returnCountOnly": "TRUE"}},
+{"name": "ids-bool-case", "params": {"f": "json", "where": "{where}", "returnIdsOnly": "True"}},
+{"name": "features-nogeom-case", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "False"}},
+{"name": "error-bool-number", "params": {"f": "json", "where": "1=1", "returnCountOnly": "1"}},
+{"name": "error-ids-bool-number", "params": {"f": "json", "where": "1=1", "returnIdsOnly": "1"}},
+{"name": "error-returngeometry-number", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "0"}}
 ]

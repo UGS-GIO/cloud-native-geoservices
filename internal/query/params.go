@@ -14,8 +14,8 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 )
 
-// Params are the request parameters as Koop normalizes them: body then query (query wins),
-// empty strings dropped, "true"/"false" as booleans and anything that parses as JSON parsed.
+// Params are the request parameters: body then query (query wins), empty strings dropped,
+// booleans and f in any case, text kept as text, and anything else that parses as JSON parsed.
 type Params map[string]any
 
 // Raw is the same request as strings, with the same precedence, so the plan, the limits and the
@@ -28,7 +28,7 @@ func Normalize(query, body url.Values) (Params, Raw) {
 	for _, src := range []url.Values{body, query} {
 		for k, v := range src {
 			if v[0] != "" {
-				raw[k], p[k] = v[0], coerce(v[0])
+				raw[k], p[k] = read(k, v[0])
 			} else if raw[k] == "" {
 				raw[k] = v[0]
 			}
@@ -37,13 +37,30 @@ func Normalize(query, body url.Values) (Params, Raw) {
 	return p, raw
 }
 
-func coerce(s string) any {
-	switch s {
-	case "true":
-		return true
-	case "false":
-		return false
+// booleans are read as true or false in any case; any other value is a 400.
+var booleans = []string{"returnGeometry", "returnCountOnly", "returnIdsOnly", "returnExtentOnly", "returnDistinctValues"}
+
+// text parameters are never parsed as JSON.
+var text = []string{"where", "outFields", "orderByFields", "groupByFieldsForStatistics"}
+
+func read(k, s string) (string, any) {
+	switch {
+	case k == "f":
+		s = strings.ToLower(s)
+		return s, s
+	case slices.Contains(text, k):
+		return s, s
+	case slices.Contains(booleans, k):
+		switch b := strings.ToLower(strings.TrimSpace(s)); b {
+		case "true", "false":
+			return b, b == "true"
+		}
+		return s, s
 	}
+	return s, coerce(s)
+}
+
+func coerce(s string) any {
 	var v any
 	if json.Unmarshal([]byte(s), &v) == nil {
 		return v
@@ -101,10 +118,14 @@ func (p Params) Validate() error {
 			return Bad("Invalid format", `"f" must be one of [json, pjson, pbf, geojson]`)
 		}
 	}
-	for _, c := range [][2]string{{"resultRecordCount", "number"}, {"resultOffset", "number"},
-		{"returnGeometry", "boolean"}, {"returnCountOnly", "boolean"}, {"outFields", "string"}, {"orderByFields", "string"}} {
-		if v, ok := p[c[0]]; ok && typeOf(v) != c[1] {
-			m := `"` + c[0] + `" must be a ` + c[1]
+	for _, k := range booleans {
+		if v, ok := p[k]; ok && typeOf(v) != "boolean" {
+			return Bad("", "'"+k+"' parameter is invalid")
+		}
+	}
+	for _, k := range []string{"resultRecordCount", "resultOffset"} {
+		if v, ok := p[k]; ok && typeOf(v) != "number" {
+			m := `"` + k + `" must be a number`
 			return Bad(m, m)
 		}
 	}
