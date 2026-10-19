@@ -21,13 +21,14 @@ import (
 )
 
 // fixture serves the testdata topics from local GeoParquet files.
-func fixture(t *testing.T) *httptest.Server {
+func fixture(t testing.TB) *httptest.Server {
 	root, _ := filepath.Abs("../../testdata")
-	return fixtureAt(t, root)
+	return fixtureAt(t, root, "gzip")
 }
 
-// fixtureAt serves the testdata topics with their data files under base (a directory or URL).
-func fixtureAt(t *testing.T, base string) *httptest.Server {
+// fixtureAt serves the testdata topics with their data files under base (a directory or URL), and
+// the content codings in compression.
+func fixtureAt(t testing.TB, base, compression string) *httptest.Server {
 	items, err := os.ReadFile("../../testdata/items.json")
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +39,9 @@ func fixtureAt(t *testing.T, base string) *httptest.Server {
 		Shapes: geom.NewShapes(16 << 20), MaxRecords: 2000, TileMaxRecords: 8000, MaxGeometryRows: 50000}
 	s := New(p, 300, "", Limits{MaxWhere: 100, MaxBody: 1024, MaxObjectIDs: 5, Timeout: 10 * time.Second,
 		MaxScans: 1, ScanWait: time.Second, MaxWork: 2, MaxLight: 4, MaxInFlight: 64, WorkWait: time.Second}, 8<<20, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := s.Compress(compression); err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -153,7 +157,7 @@ func TestCancelledOpenDoesNotFailWaiters(t *testing.T) {
 		files.ServeHTTP(w, r)
 	}))
 	t.Cleanup(origin.Close)
-	ts := fixtureAt(t, origin.URL)
+	ts := fixtureAt(t, origin.URL, "gzip")
 	u := ts.URL + "/ugs/rest/services/qfaults/default/FeatureServer/0/query?where=1=1&returnCountOnly=true&f=json"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

@@ -40,6 +40,7 @@ type Server struct {
 	Limits    Limits
 	Log       *slog.Logger
 	responses *lru.Cache[string, *encoded]
+	codings   []*coding // offered, most preferred first
 	scans     chan struct{}
 	work      chan struct{}
 	light     chan struct{}
@@ -51,7 +52,17 @@ func New(p *provider.Provider, ttl int, publicURL string, limits Limits, respons
 	return &Server{Provider: p, CacheTTL: ttl, PublicURL: publicURL, Limits: limits, Log: log,
 		responses: lru.New[string, *encoded](responseBytes), scans: make(chan struct{}, max(limits.MaxScans, 1)),
 		work: make(chan struct{}, max(limits.MaxWork, 1)), light: make(chan struct{}, max(limits.MaxLight, 1)),
-		inFlight: make(chan struct{}, max(limits.MaxInFlight, 1))}
+		inFlight: make(chan struct{}, max(limits.MaxInFlight, 1)), codings: []*coding{gzipCoding}}
+}
+
+// Compress sets the content codings offered, most preferred first, from a comma list of gzip, br
+// and zstd. The cache keeps the first.
+func (s *Server) Compress(list string) error {
+	cs, err := parseCodings(list)
+	if err == nil {
+		s.codings = cs
+	}
+	return err
 }
 
 // Handler routes requests.
@@ -203,7 +214,7 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	out = pack(out)
+	out = s.pack(out)
 	s.responses.Put(tag, out, out.size())
 	s.send(w, r, out, tag)
 }
