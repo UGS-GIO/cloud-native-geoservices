@@ -96,3 +96,10 @@ func TestGeometryPrecisionIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestRawSpatialQuotedRel(t *testing.T) {
+	s, err := Raw{"geometry": "-115,36,-108,43", "spatialRel": `"esriSpatialRelWithin"`}.Spatial()
+	if err != nil || s == nil || s.rel != "esriSpatialRelWithin" {
+		t.Fatalf("got %+v, %v", s, err)
+	}
+}

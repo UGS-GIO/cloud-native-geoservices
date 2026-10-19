@@ -31,7 +31,8 @@ func (r Raw) Spatial() (*Spatial, error) {
 	if s := r["inSR"]; s != "" {
 		inSR = coerce(s)
 	}
-	return newSpatial(coerce(g), inSR, r["spatialRel"])
+	rel, _ := coerce(r["spatialRel"]).(string)
+	return newSpatial(coerce(g), inSR, rel)
 }
 
 // Decide answers for a feature from its bbox alone when that settles it.
