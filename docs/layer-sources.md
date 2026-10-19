@@ -124,6 +124,11 @@ the request's tolerance. If no overview is fine enough, it reads the full data.
 The server does not use an overview for requests by `objectIds`, for counts, ids or statistics, or
 for requests without geometry. An overview must have the same columns that requests ask for.
 
+The layer description lists the overviews in `multiScaleGeometryInfo`, as ArcGIS Online does for
+a layer with optimized drawing. Each level is the web map zoom level at which the overview's
+tolerance is about one pixel, `round(log2(1.40625 / tolerance))`, so tolerances of 0.00068,
+0.0027 and 0.0108 degrees give `{"levels": [7, 9, 11]}`.
+
 ## Data requirements
 
 Each file must be GeoParquet 1.x with these properties:

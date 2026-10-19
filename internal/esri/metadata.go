@@ -33,6 +33,8 @@ type Metadata struct {
 	LabelingInfo       json.RawMessage
 	MinScale           json.RawMessage
 	MaxScale           json.RawMessage
+	// Levels are the web map zoom levels the layer has generalized copies (overviews) for.
+	Levels []int
 }
 
 // GeometryType is the Esri name for the provider's geometry type.
@@ -117,6 +119,9 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	}
 	if set(m.MaxScale) {
 		o.Set("maxScale", jsonx.Raw(m.MaxScale))
+	}
+	if len(m.Levels) > 0 {
+		o.Set("multiScaleGeometryInfo", jsonx.Obj{{K: "levels", V: m.Levels}})
 	}
 	return o
 }
