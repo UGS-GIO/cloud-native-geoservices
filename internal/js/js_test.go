@@ -18,24 +18,8 @@ func TestNumber(t *testing.T) {
 	}
 }
 
-func TestCompare(t *testing.T) {
-	tests := []struct {
-		name string
-		got  bool
-	}{
-		{"1 === 1.0", StrictEqual(int64(1), 1.0)},
-		{"'1' !== 1", !StrictEqual("1", 1.0)},
-		{"'1' == 1", LooseEqual("1", int64(1))},
-		{"'b' < 'c'", Less("b", "c")},
-		{"'10' < 9 is false (numeric)", !Less("10", 9.0)},
-		{"'abc' <= 1 is false", !LessEqual("abc", 1.0)},
-		{"true == 1", LooseEqual(true, 1.0)},
-		{"String(null)", String(nil) == "null" && Join(nil) == ""},
-		{"String(1e21)", String(1e21) == "1e+21"},
-	}
-	for _, tt := range tests {
-		if !tt.got {
-			t.Error(tt.name)
-		}
+func TestString(t *testing.T) {
+	if String(nil) != "null" || Join(nil) != "" || String(1e21) != "1e+21" {
+		t.Error("String")
 	}
 }

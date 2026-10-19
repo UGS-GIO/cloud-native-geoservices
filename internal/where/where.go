@@ -1,52 +1,72 @@
 // Package where parses and evaluates the SQL-92 `where` subset ArcGIS clients send:
 // = <> != < <= > >=, AND/OR/NOT, parentheses, [NOT] IN, [NOT] LIKE, IS [NOT] NULL, [NOT] BETWEEN,
-// UPPER/LOWER, string and number literals. Comparisons follow what Koop's alasql does: a null
-// operand makes a comparison false, `=` is strict, `<>` and the orderings are JavaScript's loose
-// ones. Strings compare ignoring case, as on ArcGIS Online hosted layers (collation caseSensitive
-// false), LIKE included. Field names match case-insensitively.
+// + - * / and || arithmetic, UPPER/LOWER, TRUE/FALSE, string, number, DATE and TIMESTAMP literals. It follows ArcGIS Online
+// hosted layers: logic is SQL's three-valued one, a literal converts to the type of the field it
+// is compared with, and other type mismatches are errors. Strings compare as CompareText orders
+// them, LIKE ignoring case. Field names match case-insensitively.
 package where
 
 import (
+	"cmp"
 	"fmt"
+	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 )
 
-// Expr is a compiled where clause.
-type Expr interface {
+type expr interface {
 	eval(row Row) any
+}
+
+// Clause is a compiled where clause.
+type Clause struct {
+	root  expr
+	where string
+	bad   bool
 }
 
 // Row gives a field's value by its resolved index: nil, bool, int64, float64 or string.
 type Row func(field int) any
 
-// Resolver maps a field name to an index, or false when there is no such field.
-type Resolver func(name string) (int, bool)
+// Resolver maps a field name to an index and its type (Integer, Double, Date or String), or
+// false when there is no such field.
+type Resolver func(name string) (int, string, bool)
 
-// Match reports whether row satisfies e.
-func Match(e Expr, row Row) bool { return js.Truthy(e.eval(row)) }
+// Match reports whether row satisfies the clause.
+func (c *Clause) Match(row Row) bool { return c.root.eval(row) == true }
+
+// Err reports what a matched row could not evaluate, which fails the query as on SQL Server: a
+// string meeting a number that does not convert to one, or a division by zero.
+func (c *Clause) Err() error {
+	if c.bad {
+		return &Error{c.where}
+	}
+	return nil
+}
 
 // Error is a where clause that does not parse.
 type Error struct{ Where string }
 
 func (e *Error) Error() string { return `Invalid "where" parameter: ` + e.Where }
 
-// Parse compiles where. Fields the resolver does not know evaluate as null.
-func Parse(where string, resolve Resolver) (Expr, error) {
+// Parse compiles where. An unknown field or a type mismatch is an error.
+func Parse(where string, resolve Resolver) (*Clause, error) {
 	toks, err := lex(where)
 	if err != nil {
 		return nil, &Error{where}
 	}
-	p := &parser{toks: toks, resolve: resolve}
-	e, err := p.or()
-	if err != nil || p.peek().kind != tEOF {
+	p := &parser{toks: toks, resolve: resolve, clause: &Clause{where: where}}
+	n, err := p.or()
+	if err != nil || n.k != kBool || p.peek().kind != tEOF {
 		return nil, &Error{where}
 	}
-	return e, nil
+	p.clause.root = n.e
+	return p.clause, nil
 }
 
 // --- lexer
@@ -128,7 +148,7 @@ func lex(s string) ([]token, error) {
 			}
 			i += len(word)
 		default:
-			for _, op := range []string{"<>", "!=", "<=", ">=", "==", "=", "<", ">", "-", "+"} {
+			for _, op := range []string{"<>", "!=", "<=", ">=", "==", "=", "<", ">", "-", "+", "*", "/", "||"} {
 				if strings.HasPrefix(s[i:], op) {
 					out = append(out, token{kind: tOp, text: op})
 					i += len(op)
@@ -144,10 +164,30 @@ func lex(s string) ([]token, error) {
 
 // --- parser
 
+// kind is an expression's SQL type. Numbers and dates evaluate as float64 (dates in epoch
+// milliseconds), strings as string, predicates as true, false or nil for unknown.
+type kind uint8
+
+const (
+	kNull kind = iota // the NULL literal, of any type
+	kNum
+	kStr
+	kDate
+	kBool
+)
+
+// node is a parsed expression and its type. A literal converts to the type it is compared with.
+type node struct {
+	e        expr
+	k        kind
+	lit, int bool
+}
+
 type parser struct {
 	toks    []token
 	pos     int
 	resolve Resolver
+	clause  *Clause
 }
 
 func (p *parser) peek() token { return p.toks[p.pos] }
@@ -163,178 +203,242 @@ func (p *parser) keyword(k string) bool {
 
 var errSyntax = fmt.Errorf("syntax")
 
-func (p *parser) or() (Expr, error) {
+var comparison = map[string]bool{"=": true, "==": true, "<>": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true}
+
+func (p *parser) or() (node, error) {
 	return p.chain("OR", p.and)
 }
 
-func (p *parser) and() (Expr, error) {
+func (p *parser) and() (node, error) {
 	return p.chain("AND", p.not)
 }
 
-// chain parses operands joined by the keyword kw, left to right.
-func (p *parser) chain(kw string, operand func() (Expr, error)) (Expr, error) {
+// chain parses predicates joined by the keyword kw, left to right.
+func (p *parser) chain(kw string, operand func() (node, error)) (node, error) {
 	l, err := operand()
 	if err != nil {
-		return nil, err
+		return l, err
 	}
 	for p.keyword(kw) {
 		r, err := operand()
 		if err != nil {
-			return nil, err
+			return r, err
 		}
-		l = logicExpr{kw == "AND", l, r}
+		if l.k != kBool || r.k != kBool {
+			return r, errSyntax
+		}
+		l = node{e: logicExpr{kw == "AND", l.e, r.e}, k: kBool}
 	}
 	return l, nil
 }
 
-func (p *parser) not() (Expr, error) {
+func (p *parser) not() (node, error) {
 	if p.keyword("NOT") {
-		e, err := p.not()
-		if err != nil {
-			return nil, err
+		n, err := p.not()
+		if err != nil || n.k != kBool {
+			return n, errSyntax
 		}
-		return notExpr{e}, nil
+		return node{e: notExpr{n.e}, k: kBool}, nil
 	}
 	return p.predicate()
 }
 
-func (p *parser) predicate() (Expr, error) {
-	l, err := p.value()
+func pred(e expr) (node, error) { return node{e: e, k: kBool}, nil }
+
+func (p *parser) predicate() (node, error) {
+	l, err := p.sum()
 	if err != nil {
-		return nil, err
+		return l, err
 	}
 	t := p.peek()
-	if t.kind == tOp && t.text != "-" && t.text != "+" {
+	if t.kind == tOp && comparison[t.text] {
 		p.pos++
-		r, err := p.value()
+		r, err := p.sum()
 		if err != nil {
-			return nil, err
+			return r, err
 		}
-		return cmpExpr{t.text, l, r}, nil
+		if err := p.unify(&l, &r, t.text); err != nil {
+			return l, err
+		}
+		return pred(cmpExpr{t.text, l.e, r.e, p.clause})
 	}
 	if p.keyword("IS") {
 		neg := p.keyword("NOT")
 		if !p.keyword("NULL") {
-			return nil, errSyntax
+			return l, errSyntax
 		}
-		return isNullExpr{l, neg}, nil
+		return pred(isNullExpr{l.e, neg})
 	}
 	neg := p.keyword("NOT")
 	switch {
 	case p.keyword("IN"):
 		if p.next().kind != tLParen {
-			return nil, errSyntax
+			return l, errSyntax
 		}
-		var list []Expr
+		var list []node
 		for {
-			v, err := p.value()
+			v, err := p.sum()
 			if err != nil {
-				return nil, err
+				return v, err
 			}
 			list = append(list, v)
 			if t := p.next(); t.kind == tRParen {
 				break
 			} else if t.kind != tComma {
-				return nil, errSyntax
+				return l, errSyntax
 			}
 		}
-		return inExpr{l, list, neg}, nil
+		if err := p.unifyAll(&l, list, "IN"); err != nil {
+			return l, err
+		}
+		in := inExpr{v: l.e, neg: neg, clause: p.clause}
+		for _, v := range list {
+			in.list = append(in.list, v.e)
+		}
+		return pred(in)
 	case p.keyword("LIKE"):
-		pat, err := p.value()
+		pat, err := p.sum()
 		if err != nil {
-			return nil, err
+			return pat, err
 		}
 		esc := ""
 		if p.keyword("ESCAPE") {
 			t := p.next()
 			if t.kind != tString {
-				return nil, errSyntax
+				return l, errSyntax
 			}
 			esc = t.text
 		}
-		return &likeExpr{l, pat, esc, neg, map[string]*regexp.Regexp{}}, nil
+		if l.k == kBool || pat.k != kNull && pat.k != kStr && !(pat.lit && pat.k == kNum) {
+			return l, errSyntax
+		}
+		return pred(&likeExpr{text(l), text(pat), esc, neg, map[string]*regexp.Regexp{}, p.clause})
 	case p.keyword("BETWEEN"):
-		lo, err := p.value()
+		lo, err := p.sum()
 		if err != nil {
-			return nil, err
+			return lo, err
 		}
 		if !p.keyword("AND") {
-			return nil, errSyntax
+			return l, errSyntax
 		}
-		hi, err := p.value()
+		hi, err := p.sum()
 		if err != nil {
-			return nil, err
+			return hi, err
 		}
-		return betweenExpr{l, lo, hi, neg}, nil
+		bounds := []node{lo, hi}
+		if err := p.unifyAll(&l, bounds, "BETWEEN"); err != nil {
+			return l, err
+		}
+		return pred(betweenExpr{l.e, bounds[0].e, bounds[1].e, neg, p.clause})
 	}
 	if neg {
-		return nil, errSyntax
+		return l, errSyntax
 	}
 	return l, nil
 }
 
-func (p *parser) value() (Expr, error) {
+// sum parses terms joined by + - or ||, and term values joined by * or /, left to right.
+func (p *parser) sum() (node, error)  { return p.arith(p.term, "+", "-", "||") }
+func (p *parser) term() (node, error) { return p.arith(p.value, "*", "/") }
+
+func (p *parser) arith(operand func() (node, error), ops ...string) (node, error) {
+	l, err := operand()
+	for err == nil && p.peek().kind == tOp && slices.Contains(ops, p.peek().text) {
+		op := p.next().text
+		var r node
+		if r, err = operand(); err == nil {
+			l, err = p.combine(op, l, r)
+		}
+	}
+	return l, err
+}
+
+// combine types l op r: + adds numbers or joins strings, || joins strings, the rest are numeric.
+// Integers divide to an integer, as on SQL Server.
+func (p *parser) combine(op string, l, r node) (node, error) {
+	if op == "||" {
+		if l.k != kStr && l.k != kNull || r.k != kStr && r.k != kNull {
+			return l, errSyntax
+		}
+		return node{e: arithExpr{op: "+", l: l.e, r: r.e, clause: p.clause}, k: kStr}, nil
+	}
+	if err := p.unify(&l, &r, op); err != nil {
+		return l, err
+	}
+	k := max(l.k, r.k)
+	if k == kDate || k == kStr && op != "+" {
+		return l, errSyntax
+	}
+	if z, ok := r.e.(lit); ok && op == "/" && z.v == 0.0 {
+		return l, errSyntax
+	}
+	return node{e: arithExpr{op, l.e, r.e, l.int && r.int, p.clause}, k: k, int: l.int && r.int}, nil
+}
+
+func (p *parser) value() (node, error) {
 	t := p.next()
 	switch t.kind {
 	case tNumber:
-		return lit{t.num}, nil
+		return numLit(t), nil
 	case tString:
-		return lit{t.text}, nil
+		return node{e: lit{t.text}, k: kStr, lit: true}, nil
 	case tOp:
 		if t.text == "-" || t.text == "+" {
-			v, err := p.value()
-			if err != nil {
-				return nil, err
-			}
-			if l, ok := v.(lit); ok {
-				if f, ok := l.v.(float64); ok {
-					if t.text == "-" {
-						f = -f
-					}
-					return lit{f}, nil
+			if n := p.next(); n.kind == tNumber {
+				v := numLit(n)
+				if t.text == "-" {
+					v.e = lit{-v.e.(lit).v.(float64)}
 				}
+				return v, nil
+			} else if n.kind == tIdent && p.peek().kind != tLParen {
+				v, err := p.column(n.text)
+				if err != nil || v.k != kNum {
+					return v, errSyntax
+				}
+				if t.text == "-" {
+					v.e = arithExpr{"-", lit{0.0}, v.e, v.int, p.clause}
+				}
+				return v, nil
 			}
-			return nil, errSyntax
 		}
 	case tKeyword:
 		switch t.text {
 		case "NULL":
-			return lit{nil}, nil
-		case "TRUE":
-			return lit{true}, nil
-		case "FALSE":
-			return lit{false}, nil
+			return node{e: lit{nil}, k: kNull, lit: true}, nil
+		case "TRUE", "FALSE":
+			return node{e: lit{t.text == "TRUE"}, k: kBool}, nil
 		case "DATE", "TIMESTAMP":
 			// A literal only when a string follows (DATE '2020-01-01'); otherwise a column name.
 			if p.peek().kind == tString {
 				ms, err := parseTime(p.next().text)
 				if err != nil {
-					return nil, errSyntax
+					return node{}, errSyntax
 				}
-				return lit{ms}, nil
+				return node{e: lit{ms}, k: kDate}, nil
 			}
-			return p.column(t.text), nil
+			return p.column(t.text)
 		case "ESCAPE":
-			return p.column(t.text), nil
+			return p.column(t.text)
 		}
 	case tLParen:
-		e, err := p.or()
+		n, err := p.or()
 		if err != nil {
-			return nil, err
+			return n, err
 		}
 		if p.next().kind != tRParen {
-			return nil, errSyntax
+			return n, errSyntax
 		}
-		return e, nil
+		n.lit = false
+		return n, nil
 	case tIdent:
 		if p.peek().kind == tLParen {
 			p.pos++
-			var args []Expr
+			var args []node
 			if p.peek().kind != tRParen {
 				for {
 					a, err := p.or()
 					if err != nil {
-						return nil, err
+						return a, err
 					}
 					args = append(args, a)
 					if p.peek().kind != tComma {
@@ -344,25 +448,121 @@ func (p *parser) value() (Expr, error) {
 				}
 			}
 			if p.next().kind != tRParen {
-				return nil, errSyntax
+				return node{}, errSyntax
 			}
 			name := strings.ToUpper(t.text)
-			if (name == "UPPER" || name == "LOWER" || name == "UCASE" || name == "LCASE") && len(args) == 1 {
-				return funcExpr{name, args[0]}, nil
+			if (name == "UPPER" || name == "LOWER" || name == "UCASE" || name == "LCASE") && len(args) == 1 && args[0].k != kBool {
+				return node{e: funcExpr{name == "UPPER" || name == "UCASE", text(args[0])}, k: kStr}, nil
 			}
-			return nil, errSyntax
+			return node{}, errSyntax
 		}
-		return p.column(t.text), nil
+		return p.column(t.text)
 	}
-	return nil, errSyntax
+	return node{}, errSyntax
 }
 
-// column is a field reference; an unknown name evaluates as null.
-func (p *parser) column(name string) Expr {
-	if i, ok := p.resolve(name); ok {
-		return field(i)
+func numLit(t token) node {
+	return node{e: lit{t.num}, k: kNum, lit: true, int: !strings.ContainsAny(t.text, ".eE") && t.num <= math.MaxInt32}
+}
+
+func (p *parser) column(name string) (node, error) {
+	i, typ, ok := p.resolve(name)
+	if !ok {
+		return node{}, errSyntax
 	}
-	return lit{nil}
+	switch typ {
+	case "Integer":
+		return node{e: field(i), k: kNum, int: true}, nil
+	case "Double":
+		return node{e: field(i), k: kNum}, nil
+	case "Date":
+		return node{e: field(i), k: kDate}, nil
+	}
+	return node{e: field(i), k: kStr}, nil
+}
+
+// unify gives a and b one type for operator op, as ArcGIS Online does: a literal converts to the
+// other side's type (a string to a number or a date, and for = and <> a number to a string), and
+// otherwise a string converts to the number it meets as each row is read.
+func (p *parser) unify(a, b *node, op string) error {
+	if a.k == kBool || b.k == kBool {
+		return errSyntax
+	}
+	if a.k == b.k || a.k == kNull || b.k == kNull {
+		return nil
+	}
+	if b.lit && convert(b, *a, op) || a.lit && convert(a, *b, op) {
+		return nil
+	}
+	if a.k == kStr && b.k == kNum && !a.lit {
+		*a = node{e: toNum{a.e, b.int, p.clause}, k: kNum, int: b.int}
+		return nil
+	}
+	if b.k == kStr && a.k == kNum && !b.lit {
+		*b = node{e: toNum{b.e, a.int, p.clause}, k: kNum, int: a.int}
+		return nil
+	}
+	return errSyntax
+}
+
+// unifyAll unifies v with each of list, twice, so a type v takes from a later item reaches the
+// earlier ones.
+func (p *parser) unifyAll(v *node, list []node, op string) error {
+	for range 2 {
+		for i := range list {
+			if err := p.unify(v, &list[i], op); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+var (
+	integer = regexp.MustCompile(`^[-+]?[0-9]+$`)
+	decimal = regexp.MustCompile(`^[-+]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?$`)
+)
+
+// convert turns literal n into to's type, reporting whether it can.
+func convert(n *node, to node, op string) bool {
+	v := n.e.(lit).v
+	switch {
+	case n.k == kStr && to.k == kNum:
+		f, ok := parseNum(v.(string), to.int)
+		if !ok {
+			return false
+		}
+		*n = node{e: lit{f}, k: kNum, lit: true, int: to.int}
+	case n.k == kStr && to.k == kDate:
+		ms, err := parseTime(strings.TrimSpace(v.(string)))
+		if err != nil {
+			return false
+		}
+		*n = node{e: lit{ms}, k: kDate, lit: true}
+	case n.k == kNum && to.k == kStr && (op == "=" || op == "==" || op == "<>" || op == "!="):
+		*n = node{e: lit{jsonx.NumberString(v.(float64))}, k: kStr, lit: true}
+	default:
+		return false
+	}
+	return true
+}
+
+// parseNum reads s as SQL Server converts a string to an integer, or else to a decimal.
+func parseNum(s string, integral bool) (float64, bool) {
+	s = strings.TrimSpace(s)
+	if !integer.MatchString(s) && (integral || !decimal.MatchString(s)) {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	return f, err == nil
+}
+
+// text is n as a string, for LIKE and UPPER/LOWER.
+func text(n node) expr {
+	if n.k == kNum || n.k == kDate {
+		return toText{n.e, n.k, n.int}
+	}
+	return n.e
 }
 
 func parseTime(s string) (float64, error) {
@@ -374,134 +574,301 @@ func parseTime(s string) (float64, error) {
 	return 0, fmt.Errorf("bad time %q", s)
 }
 
-// --- evaluation, with JavaScript's value semantics
+// --- evaluation
 
 type lit struct{ v any }
 type field int
+type toText struct {
+	e   expr
+	k   kind
+	int bool
+}
+type toNum struct {
+	e      expr
+	int    bool
+	clause *Clause
+}
 type logicExpr struct {
 	and  bool
-	l, r Expr
+	l, r expr
 }
-type notExpr struct{ e Expr }
+type notExpr struct{ e expr }
+type arithExpr struct {
+	op     string
+	l, r   expr
+	int    bool
+	clause *Clause
+}
 type cmpExpr struct {
-	op   string
-	l, r Expr
+	op     string
+	l, r   expr
+	clause *Clause
 }
 type isNullExpr struct {
-	v   Expr
+	v   expr
 	neg bool
 }
 type inExpr struct {
-	v    Expr
-	list []Expr
-	neg  bool
+	v      expr
+	list   []expr
+	neg    bool
+	clause *Clause
 }
 type likeExpr struct {
-	v, pattern Expr
+	v, pattern expr
 	escape     string
 	neg        bool
 	cache      map[string]*regexp.Regexp
+	clause     *Clause
 }
 type betweenExpr struct {
-	v, lo, hi Expr
+	v, lo, hi expr
 	neg       bool
+	clause    *Clause
 }
 type funcExpr struct {
-	name string
-	arg  Expr
+	upper bool
+	arg   expr
 }
 
-func (e lit) eval(Row) any       { return e.v }
-func (e field) eval(row Row) any { return row(int(e)) }
-func (e logicExpr) eval(row Row) any {
-	if js.Truthy(e.l.eval(row)) != e.and {
-		return !e.and // AND stops at a falsy operand, OR at a truthy one
+func (e lit) eval(Row) any { return e.v }
+
+// eval reads numbers and dates as float64, and NaN as null.
+func (e field) eval(row Row) any {
+	switch v := row(int(e)).(type) {
+	case int64:
+		return float64(v)
+	case float64:
+		if math.IsNaN(v) {
+			return nil
+		}
+		return v
+	case bool:
+		if v {
+			return 1.0
+		}
+		return 0.0
+	default:
+		return v
 	}
-	return js.Truthy(e.r.eval(row))
 }
-func (e notExpr) eval(row Row) any { return !js.Truthy(e.e.eval(row)) }
+
+// eval writes a number or date as SQL Server converts a float or datetime2 to text.
+func (e toText) eval(row Row) any {
+	f, ok := e.e.eval(row).(float64)
+	switch {
+	case !ok:
+		return nil
+	case e.k == kDate:
+		return time.UnixMilli(int64(f)).UTC().Format("2006-01-02 15:04:05.0000000")
+	case e.int:
+		return jsonx.NumberString(f)
+	}
+	s := strconv.FormatFloat(f, 'g', 6, 64)
+	if i := strings.IndexByte(s, 'e'); i >= 0 && len(s)-i == 4 {
+		s = s[:i+2] + "0" + s[i+2:] // e+06 is e+006
+	}
+	return s
+}
+
+func (e toNum) eval(row Row) any {
+	v, ok := e.e.eval(row).(string)
+	if !ok {
+		return nil
+	}
+	if f, ok := parseNum(v, e.int); ok {
+		return f
+	}
+	e.clause.bad = true
+	return nil
+}
+
+func (e logicExpr) eval(row Row) any {
+	l := e.l.eval(row)
+	if l == !e.and {
+		return l // AND stops at false, OR at true
+	}
+	r := e.r.eval(row)
+	if l == nil && r != !e.and {
+		return nil
+	}
+	return r
+}
+
+func (e arithExpr) eval(row Row) any {
+	a, b := e.l.eval(row), e.r.eval(row)
+	if a == nil || b == nil {
+		return nil
+	}
+	s, ok1 := a.(string)
+	t, ok2 := b.(string)
+	if ok1 && ok2 {
+		return s + t
+	}
+	x, ok1 := a.(float64)
+	y, ok2 := b.(float64)
+	if !ok1 || !ok2 {
+		e.clause.bad = true
+		return nil
+	}
+	var r float64
+	switch e.op {
+	case "+":
+		r = x + y
+	case "-":
+		r = x - y
+	case "*":
+		r = x * y
+	default:
+		if y == 0 {
+			e.clause.bad = true // divide by zero
+			return nil
+		}
+		r = x / y
+		if e.int {
+			r = math.Trunc(r)
+		}
+	}
+	if e.int && (r < math.MinInt32 || r > math.MaxInt32) {
+		e.clause.bad = true // SQL Server's int overflows
+		return nil
+	}
+	return r
+}
+
+func (e notExpr) eval(row Row) any {
+	if v, ok := e.e.eval(row).(bool); ok {
+		return !v
+	}
+	return nil
+}
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
-// Fold lower-cases a and b when both are strings, so they compare ignoring case.
-func Fold(a, b any) (any, any) {
-	if sa, ok := a.(string); ok {
-		if sb, ok := b.(string); ok {
-			return strings.ToLower(sa), strings.ToLower(sb)
-		}
+// compare orders two non-null values, reporting false when they are not both numbers or both
+// strings.
+func compare(a, b any) (int, bool) {
+	switch x := a.(type) {
+	case float64:
+		y, ok := b.(float64)
+		return cmp.Compare(x, y), ok
+	case string:
+		y, ok := b.(string)
+		return CompareText(x, y), ok
 	}
-	return a, b
+	return 0, false
+}
+
+var wordSort = strings.NewReplacer("-", "", "'", "")
+
+// CompareText orders strings as ArcGIS Online hosted layers do (SQL Server's case-insensitive
+// word sort): ignoring case, and hyphens and apostrophes unless the rest is equal.
+func CompareText(a, b string) int {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	if c := strings.Compare(wordSort.Replace(a), wordSort.Replace(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }
 
 func (e cmpExpr) eval(row Row) any {
-	a, b := Fold(e.l.eval(row), e.r.eval(row))
-	if js.IsNullish(a) || js.IsNullish(b) {
-		return false
+	a, b := e.l.eval(row), e.r.eval(row)
+	if a == nil || b == nil {
+		return nil
+	}
+	c, ok := compare(a, b)
+	if !ok {
+		e.clause.bad = true
+		return nil
 	}
 	switch e.op {
 	case "=", "==":
-		return js.StrictEqual(a, b)
+		return c == 0
 	case "<>", "!=":
-		return !js.LooseEqual(a, b)
+		return c != 0
 	case "<":
-		return js.Less(a, b)
+		return c < 0
 	case ">":
-		return js.Less(b, a)
+		return c > 0
 	case "<=":
-		return js.LessEqual(a, b)
-	case ">=":
-		return js.LessEqual(b, a)
+		return c <= 0
 	}
-	return false
+	return c >= 0
 }
 
 func (e inExpr) eval(row Row) any {
 	v := e.v.eval(row)
-	if js.IsNullish(v) {
-		return false
+	if v == nil {
+		return nil
 	}
+	var out any = e.neg
 	for _, x := range e.list {
-		if js.StrictEqual(Fold(v, x.eval(row))) {
+		x := x.eval(row)
+		if x == nil {
+			out = nil // no match is unknown when the list has a null
+		} else if c, ok := compare(v, x); !ok {
+			e.clause.bad = true
+			return nil
+		} else if c == 0 {
 			return !e.neg
 		}
 	}
-	return e.neg
+	return out
 }
 
 func (e *likeExpr) eval(row Row) any {
 	v, pat := e.v.eval(row), e.pattern.eval(row)
-	if js.IsNullish(v) || js.IsNullish(pat) {
-		return false
+	if v == nil || pat == nil {
+		return nil
 	}
-	p := js.String(pat)
+	p, ok1 := pat.(string)
+	s, ok2 := v.(string)
+	if !ok1 || !ok2 {
+		e.clause.bad = true
+		return nil
+	}
 	re, ok := e.cache[p]
 	if !ok {
 		re = likeRegexp(p, e.escape)
 		e.cache[p] = re
 	}
-	return re.MatchString(js.String(v)) != e.neg
+	return re.MatchString(s) != e.neg
 }
 
 func (e betweenExpr) eval(row Row) any {
 	v, lo, hi := e.v.eval(row), e.lo.eval(row), e.hi.eval(row)
-	if js.IsNullish(v) || js.IsNullish(lo) || js.IsNullish(hi) {
-		return false
+	in := logicExpr{true, lit{e.bound(lo, v)}, lit{e.bound(v, hi)}}.eval(row)
+	if b, ok := in.(bool); ok {
+		return b != e.neg
 	}
-	return (js.LessEqual(Fold(lo, v)) && js.LessEqual(Fold(v, hi))) != e.neg
+	return nil
+}
+
+// bound is a <= b, unknown when either is null.
+func (e betweenExpr) bound(a, b any) any {
+	if a == nil || b == nil {
+		return nil
+	}
+	c, ok := compare(a, b)
+	if !ok {
+		e.clause.bad = true
+		return nil
+	}
+	return c <= 0
 }
 
 func (e funcExpr) eval(row Row) any {
-	v := e.arg.eval(row)
-	if v == nil {
+	v, ok := e.arg.eval(row).(string)
+	if !ok {
 		return nil
 	}
-	if e.name == "UPPER" || e.name == "UCASE" {
-		return strings.ToUpper(js.String(v))
+	if e.upper {
+		return strings.ToUpper(v)
 	}
-	return strings.ToLower(js.String(v))
+	return strings.ToLower(v)
 }
 
-// likeRegexp builds alasql's LIKE pattern: % any run, _ one character, case-insensitive.
+// likeRegexp builds a LIKE pattern: % any run, _ one character, case-insensitive.
 func likeRegexp(p, escape string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("(?is)^")

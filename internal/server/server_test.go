@@ -77,7 +77,7 @@ func TestQueries(t *testing.T) {
 		check       func(map[string]any) bool
 	}{
 		{"count", "where=1=1&returnCountOnly=true", func(b map[string]any) bool { return b["count"] == 300.0 }},
-		{"page", "resultRecordCount=10&outFields=*", func(b map[string]any) bool {
+		{"page", "where=1=1&resultRecordCount=10&outFields=*", func(b map[string]any) bool {
 			return len(b["features"].([]any)) == 10 && b["exceededTransferLimit"] == true
 		}},
 		{"box without geometry", "geometry=-114,36,-109,43&returnGeometry=false&resultRecordCount=5", func(b map[string]any) bool {
@@ -110,7 +110,7 @@ func TestQueries(t *testing.T) {
 
 func TestETag(t *testing.T) {
 	ts := fixture(t)
-	u := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?f=json&resultRecordCount=3"
+	u := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?f=json&where=1=1&resultRecordCount=3"
 	res, _ := get(t, u)
 	tag := res.Header.Get("ETag")
 	if !strings.HasPrefix(tag, `"`) || !strings.Contains(res.Header.Get("Cache-Control"), "stale-while-revalidate=300") {

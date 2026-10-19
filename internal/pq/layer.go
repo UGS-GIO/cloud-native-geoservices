@@ -204,7 +204,8 @@ func converted(el *format.SchemaElement) (deprecated.ConvertedType, bool) {
 	return el.ConvertedType.Get()
 }
 
-// fieldType is the Esri type the provider declares for a column.
+// fieldType is the Esri type the provider declares for a column: String exactly when converter
+// reads strings.
 func fieldType(el *format.SchemaElement) string {
 	if el.Name == "feature_id" {
 		return "Integer"
@@ -213,14 +214,21 @@ func fieldType(el *format.SchemaElement) string {
 	case *format.TimestampType, *format.DateType:
 		return "Date"
 	}
+	if _, ok := el.LogicalType.Value.(*format.DecimalType); ok {
+		return "Double"
+	}
 	if ct, ok := converted(el); ok {
 		switch ct {
 		case deprecated.Date, deprecated.TimestampMillis, deprecated.TimestampMicros:
 			return "Date"
+		case deprecated.Decimal:
+			return "Double"
 		}
 	}
 	t, _ := el.Type.Get()
 	switch t {
+	case format.Int96:
+		return "Date"
 	case format.Int32, format.Boolean:
 		return "Integer"
 	case format.Int64, format.Double, format.Float:

@@ -1,7 +1,10 @@
 package geom
 
 import (
+	"encoding/json"
 	"math"
+	"strconv"
+	"strings"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/project"
@@ -15,8 +18,35 @@ const (
 	spi    = 3.14159265359
 )
 
+// Wkid reads a spatial reference as AGOL does: a whole number, its digits, or an object (or its
+// JSON) whose wkid is one of those; latestWkid is ignored.
+func Wkid(v any) (int, bool) {
+	switch x := v.(type) {
+	case float64:
+		if x == math.Trunc(x) && !math.IsInf(x, 0) {
+			return int(x), true
+		}
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
+			return n, true
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(x), &m) == nil {
+			return Wkid(m)
+		}
+	case map[string]any:
+		if w, ok := x["wkid"].(float64); ok {
+			return Wkid(w)
+		}
+		if w, ok := x["wkid"].(string); ok {
+			return Wkid(w)
+		}
+	}
+	return 0, false
+}
+
 // Mercator wkids: what we project to and from.
-var Mercator = map[int]bool{102100: true, 102113: true, 3857: true, 900913: true}
+var Mercator = map[int]bool{102100: true, 102113: true, 3857: true, 3785: true, 900913: true}
 
 func adjustLon(x float64) float64 {
 	if math.Abs(x) <= spi {

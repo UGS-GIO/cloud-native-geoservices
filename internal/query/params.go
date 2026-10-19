@@ -57,6 +57,10 @@ func (p Params) True(k string) bool { v, ok := p[k].(bool); return ok && v }
 // String is the parameter when it is a string.
 func (p Params) String(k string) (string, bool) { s, ok := p[k].(string); return s, ok }
 
+func (p Params) has(keys ...string) bool {
+	return slices.ContainsFunc(keys, func(k string) bool { _, ok := p[k]; return ok })
+}
+
 // Number is the parameter when it is a number.
 func (p Params) Number(k string) (float64, bool) { f, ok := p[k].(float64); return f, ok }
 
@@ -104,6 +108,9 @@ func (p Params) Validate() error {
 			return Bad(m, m)
 		}
 	}
+	if w, _ := p.String("where"); strings.TrimSpace(w) == "" && !p.has("objectIds", "geometry", "outStatistics", "time") {
+		return Bad("No where clause specified")
+	}
 	if v, ok := p["objectIds"]; ok {
 		if f, num := v.(float64); typeOf(v) != "string" && !(num && isInt(f)) {
 			m := `"objectIds" does not match any of the allowed types`
@@ -111,7 +118,7 @@ func (p Params) Validate() error {
 		}
 	}
 	if v, ok := p["outSR"]; ok {
-		if _, ok := wkid(v); !ok {
+		if _, ok := geom.Wkid(v); !ok {
 			m := `"outSR" does not match any of the allowed types`
 			return Bad(m, m)
 		}
@@ -131,11 +138,14 @@ func (p Params) Validate() error {
 			return Bad("'units' parameter is invalid")
 		}
 	}
-	for _, k := range []string{"outSR", "inSR"} {
-		if v, ok := p[k]; ok {
-			if id, ok := wkid(v); ok && !supported(id) {
-				return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326 and Web Mercator (102100, 3857) are supported")
-			}
+	if v, ok := p["outSR"]; ok {
+		if id, _ := geom.Wkid(v); outputSRs[id].Wkid == 0 {
+			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785) are supported")
+		}
+	}
+	if v, ok := p["inSR"]; ok {
+		if id, ok := geom.Wkid(v); ok && !supported(id) {
+			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785, 900913) are supported")
 		}
 	}
 	return nil
@@ -162,28 +172,6 @@ func supported(id int) bool {
 		return true
 	}
 	return false
-}
-
-// wkid reads a spatial reference given as a number or {wkid, latestWkid}.
-func wkid(v any) (int, bool) {
-	switch x := v.(type) {
-	case float64:
-		if isInt(x) {
-			return int(x), true
-		}
-	case string:
-		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return n, true
-		}
-	case map[string]any:
-		if w, ok := x["wkid"].(float64); ok && isInt(w) {
-			return int(w), true
-		}
-		if w, ok := x["latestWkid"].(float64); ok && isInt(w) {
-			return int(w), true
-		}
-	}
-	return 0, false
 }
 
 // Quantization is the PBF transform a client asks for.

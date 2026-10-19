@@ -10,6 +10,9 @@ import (
 	"testing"
 
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/deprecated"
+	"github.com/parquet-go/parquet-go/encoding/thrift"
+	"github.com/parquet-go/parquet-go/format"
 )
 
 func open(t *testing.T, name string) *Layer {
@@ -170,5 +173,34 @@ func TestInBoxPages(t *testing.T) {
 	}
 	if !pruned || !sure || !covers {
 		t.Error("the page index pruned nothing", pruned, sure, covers)
+	}
+}
+
+func TestFieldTypeMatchesConverter(t *testing.T) {
+	el := func(typ format.Type, ct *deprecated.ConvertedType, lt format.LogicalTypeValue) *format.SchemaElement {
+		e := &format.SchemaElement{Name: "c", Type: thrift.New(typ), LogicalType: format.LogicalType{Value: lt}}
+		if ct != nil {
+			e.ConvertedType = thrift.New(*ct)
+		}
+		return e
+	}
+	dec, date := deprecated.Decimal, deprecated.Date
+	for _, tt := range []struct {
+		el   *format.SchemaElement
+		want string
+	}{
+		{el(format.FixedLenByteArray, &dec, &format.DecimalType{Scale: 2, Precision: 38}), "Double"},
+		{el(format.ByteArray, &dec, nil), "Double"},
+		{el(format.Int32, nil, &format.DecimalType{Scale: 2, Precision: 9}), "Double"},
+		{el(format.Int96, nil, nil), "Date"},
+		{el(format.Int32, &date, nil), "Date"},
+		{el(format.Boolean, nil, nil), "Integer"},
+		{el(format.ByteArray, nil, &format.StringType{}), "String"},
+		{el(format.FixedLenByteArray, nil, nil), "String"},
+	} {
+		kind, _ := converter(tt.el, false)
+		if got := fieldType(tt.el); got != tt.want || (got == "String") != (kind == KindString) {
+			t.Errorf("%v %v: %s, kind %v", tt.el.Type, tt.el.LogicalType.Value, got, kind)
+		}
 	}
 }

@@ -84,20 +84,6 @@
  ],
  "known": [
   {"match": [
-   "*/error-where-field: error (missing)",
-   "*/error-where-field: count (extra)",
-   "*/error-outfields: *",
-   "*/error-orderby: *",
-   "*/error-stats-field: *"],
-   "reason": "An unknown field in where, outFields, orderByFields or outStatistics is not an error: where matches nothing, outFields and orderByFields are dropped, and the statistic is empty."},
-  {"match": [
-   "*/stats*: features[].attributes.stddev_v (value)"],
-   "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
-  {"match": [
-   "*/stats-string: features[].attributes.min_v (missing)",
-   "*/stats-string: features[].attributes.max_v (missing)"],
-   "reason": "min and max of a string field are left out."},
-  {"match": [
    "*/stats*: fields[*].type (value)",
    "*/stats*: fields[*].length (missing)"],
    "reason": "Statistics fields are not typed by their source: count is a double (Esri: integer), min and max of an integer field are doubles, and string and date results have no length."},
@@ -124,10 +110,6 @@
    "*/geojson-count: type (missing)"],
    "reason": "f=geojson: features have no id, have no type when outFields is not *, and a count is {\"count\": n} where Esri writes a FeatureCollection with properties.count."},
   {"match": [
-   "*/features-subset-case: features[].attributes.* (missing)",
-   "*/features-subset-case: fields[*] (missing)"],
-   "reason": "outFields names are case-sensitive; Esri matches them in any case."},
-  {"match": [
    "*/features-utm: error (extra)",
    "*/features-utm: * (missing)"],
    "reason": "outSR other than 4326, 4269 and Web Mercator is a 400."},
@@ -140,10 +122,8 @@
    "reason": "f=pbf lists fields in alphabetical order, not schema order."},
   {"match": [
    "*: *spatialReference.latestWkid (missing)",
-   "*/features-3857: spatialReference.wkid (value)",
-   "*/extent-3857: extent.spatialReference.wkid (value)",
    "*/layer: spatialReference (missing)"],
-   "reason": "outSR=3857 is answered as wkid 3857, where Esri writes 102100 with latestWkid 3857. Extents and f=pbf leave out latestWkid, and the layer has no spatialReference."},
+   "reason": "f=pbf leaves out latestWkid, and the layer has no spatialReference."},
   {"match": [
    "*: fields[GlobalID].type (value)",
    "*: globalIdFieldName (*)",

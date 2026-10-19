@@ -10,8 +10,9 @@ import (
 	"math"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
+
+	"github.com/paulmach/orb"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
@@ -66,30 +67,10 @@ func parseJSON(s string) any {
 	return s
 }
 
-var digits = regexp.MustCompile(`^\d+$`)
-
-// WkidOf reads a spatial reference: a number, digits, or {latestWkid, wkid}; 0 when absent.
+// WkidOf is geom.Wkid, 0 when absent or unreadable.
 func WkidOf(v any) int {
-	if s, ok := v.(string); ok {
-		v = parseJSON(s)
-	}
-	switch x := v.(type) {
-	case float64:
-		return int(x)
-	case string:
-		if digits.MatchString(x) {
-			n, _ := strconv.Atoi(x)
-			return n
-		}
-	case map[string]any:
-		if w, ok := x["latestWkid"].(float64); ok {
-			return int(w)
-		}
-		if w, ok := x["wkid"].(float64); ok {
-			return int(w)
-		}
-	}
-	return 0
+	n, _ := geom.Wkid(v)
+	return n
 }
 
 func isTrue(v string) bool { return v == "true" }
@@ -171,10 +152,14 @@ func FilterBox(params map[string]string) *[4]float64 {
 	if wkid == 0 {
 		wkid = 4326
 	}
-	if geom.Mercator[wkid] {
+	switch {
+	case geom.Mercator[wkid]:
 		box[0], box[1] = geom.BoxToLonLat(box[0], box[1])
 		box[2], box[3] = geom.BoxToLonLat(box[2], box[3])
-	} else if wkid != 4326 && wkid != 4269 {
+	case wkid == 4269:
+		lo, hi := geom.FromNAD83(orb.Point{box[0], box[1]}), geom.FromNAD83(orb.Point{box[2], box[3]})
+		box = [4]float64{lo[0], lo[1], hi[0], hi[1]}
+	case wkid != 4326:
 		return nil // an SR we don't project: no prefilter, the exact test still filters
 	}
 	if d := js.ParseNumber(params["distance"]); d > 0 {

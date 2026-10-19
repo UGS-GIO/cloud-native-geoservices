@@ -62,5 +62,9 @@ func (s *FeatureSet) AppendJSON(buf []byte) []byte {
 
 // AppendJSON implements jsonx.Appender.
 func (ids *IDs) AppendJSON(buf []byte) []byte {
-	return jsonx.Append(buf, jsonx.Obj{{K: "objectIdFieldName", V: ids.IDField}, {K: "objectIds", V: ids.IDs}})
+	o := jsonx.Obj{{K: "objectIdFieldName", V: ids.IDField}, {K: "objectIds", V: ids.IDs}}
+	if ids.Exceeded {
+		o.Set("exceededTransferLimit", true)
+	}
+	return jsonx.Append(buf, o)
 }

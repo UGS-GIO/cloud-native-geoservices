@@ -123,8 +123,14 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 `/query` accepts GET and POST. Supported parameters:
 
 - `where`: SQL subset (comparisons, `AND`/`OR`/`NOT`, `IN`, `LIKE`, `IS NULL`, `BETWEEN`,
-  `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals). Field names match case-insensitively, and
-  strings compare and sort ignoring case, as on ArcGIS Online.
+  `+ - * /` and `||`, `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals), evaluated as on ArcGIS
+  Online: field names match case-insensitively, strings compare and sort ignoring case (and
+  hyphens and apostrophes, as SQL Server sorts words), a literal converts to the type of the
+  field it meets (`FIPS = '49035'`, `UPDATED > '2020-01-01'`), other type mismatches are a 400,
+  and a comparison with a null is unknown, so `NOT` does not match it. `LIKE` reads a number or
+  date as SQL Server writes it (`38.7973`, `4.00911e+006`, `2011-08-11 09:00:00.0000000`), and
+  integer arithmetic past 32 bits is a 400. A query needs a `where` unless it has `objectIds`,
+  `geometry` or `outStatistics`.
 - `objectIds`, `outFields`, `returnGeometry`, `orderByFields`, `resultOffset`,
   `resultRecordCount`, `resultType=tile`, `maxAllowableOffset`, `geometryPrecision`.
 - `geometry` (envelope, point, multipoint, polyline, polygon), `geometryType`, `inSR`,
@@ -146,7 +152,8 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
 
 - Point layers return multipoint geometry in `f=json` and `f=geojson`.
 - `outSR` and `inSR`: only 4326, 4269 and Web Mercator (3857, 102100 and aliases). Other spatial
-  references give a 400.
+  references give a 400. As on ArcGIS Online, 4269 converts with WGS_1984_(ITRF00)_To_NAD_1983,
+  and an `outSR` of 900913 is a 400.
 - `f=geojson` does not fully conform to RFC 7946 (for example, the multipoint geometry above).
 - Statistics are not typed by their source field. For example, `min` of an integer field is
   reported as a double.
@@ -157,9 +164,8 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
 - The service path prefix `/ugs/rest/services` is fixed.
 - `testdata/conformance/known_gaps.json` lists every other difference from ArcGIS Online that the
   conformance suite finds.
-- Some behavior follows Koop, which this service replaced: a `where` that contains `1=1` is
-  ignored, `exceededTransferLimit` is null when the server did not page, and multipolygon rings
-  are written hole first.
+- Some behavior follows Koop, which this service replaced: `exceededTransferLimit` is null when
+  the server did not page, and multipolygon rings are written hole first.
 
 ## Conformance
 
@@ -186,7 +192,8 @@ gh release create conformance-data --title "Conformance data" --notes "Large con
 gh release upload conformance-data conformance-large.tar.gz --clobber
 ```
 
-`-skip-extract` records the answers again and keeps the copies.
+`-skip-extract` records the answers again and keeps the copies. `-names a,b` records only
+those requests into the existing recordings.
 
 ## Development
 

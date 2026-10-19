@@ -65,9 +65,9 @@ func QueryFields(m *Metadata, outFields string) []Field {
 	}
 	want := map[string]bool{}
 	for _, f := range strings.Split(outFields, ",") {
-		want[strings.TrimSpace(f)] = true
+		want[strings.ToLower(strings.TrimSpace(f))] = true
 	}
-	return slices.DeleteFunc(out, func(f Field) bool { return !want[f.Name] })
+	return slices.DeleteFunc(out, func(f Field) bool { return !want[strings.ToLower(f.Name)] })
 }
 
 // LayerFields are the layer description's fields: every field, marked not editable or nullable.
@@ -83,25 +83,11 @@ func LayerFields(m *Metadata) []any {
 // GroupField is a statistics group-by field, described from the layer's definition.
 func GroupField(m *Metadata, name string) (Field, bool) {
 	for _, c := range m.Fields {
-		if c.Name == name {
+		if strings.EqualFold(c.Name, name) {
 			return definitionField(c.Name, c.Type), true
 		}
 	}
 	return Field{}, false
-}
-
-// ValueField describes a field from a sample value, as Koop does for unknown group-by fields.
-func ValueField(name string, v any) Field {
-	switch x := v.(type) {
-	case int64:
-		return definitionField(name, "Integer")
-	case float64:
-		if x == float64(int64(x)) {
-			return definitionField(name, "Integer")
-		}
-		return definitionField(name, "Double")
-	}
-	return definitionField(name, "String")
 }
 
 // StatisticField is an outStatistics result field.
