@@ -161,6 +161,16 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 			g.accs[j].add(v)
 		}
 	}
+	if len(w.order) == 0 { // SQL Server's GROUP BY sorts by the group
+		slices.SortStableFunc(groups, func(a, b *group) int {
+			for j := range a.values {
+				if c := compareKeys(a.values[j], b.values[j], false); c != 0 {
+					return c
+				}
+			}
+			return 0
+		})
+	}
 	if len(groups) == 0 && len(w.groupBy) == 0 {
 		groups = []*group{{accs: make([]accumulator, len(w.aggregates))}}
 	}
@@ -186,9 +196,7 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 			return 0
 		})
 	}
-	if w.limit != 0 {
-		rows = rows[min(len(rows), w.offset):min(len(rows), w.offset+w.limit)]
-	}
+	rows, exceeded := page(w, rows)
 
 	dateFields := map[string]bool{}
 	for _, a := range w.aggregates {
@@ -220,7 +228,12 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 		fieldObjs[i] = f.Obj
 	}
 	out := jsonx.Obj{{K: "displayFieldName", V: ""}, {K: "fields", V: fieldObjs}, {K: "features", V: jsonFeats}}
-	return &Response{JSON: out, Features: &FeatureSet{Fields: fields, Features: feats, NoGeometry: true}}, nil
+	fs := &FeatureSet{Fields: fields, Features: feats, NoGeometry: true}
+	if exceeded {
+		out.Set("exceededTransferLimit", true)
+		fs.Exceeded = True
+	}
+	return &Response{JSON: out, Features: fs}, nil
 }
 
 // getFold is a row's value for a key in any case.

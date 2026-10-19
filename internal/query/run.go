@@ -26,8 +26,9 @@ type Response struct {
 
 // IDs is a returnIdsOnly result.
 type IDs struct {
-	IDField string
-	IDs     []any
+	IDField  string
+	IDs      []any
+	Exceeded bool // a page that has more after it
 }
 
 // SpatialRef is an output spatial reference.
@@ -100,13 +101,16 @@ func Run(c *Collection, p Params) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.True("returnCountOnly") || p.True("returnExtentOnly") {
+		w.limit, w.offset = 0, 0 // AGOL counts and covers every match, not a page
+	}
 	idx, err := w.filter()
 	if err != nil {
 		return nil, err
 	}
 	if c.Next != nil {
 		// An unpaged count needs no rows kept, only tallied.
-		tally := p.True("returnCountOnly") && !p.True("returnExtentOnly") && w.limit == 0
+		tally := p.True("returnCountOnly") && !p.True("returnExtentOnly")
 		var n int64
 		if idx, n, err = w.drain(idx, tally); err != nil {
 			return nil, err
@@ -135,7 +139,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 		return &Response{JSON: o, Count: &n}, nil
 	}
 	if p.True("returnIdsOnly") {
-		ids := &IDs{IDField: c.Meta.IDField}
+		ids := &IDs{IDField: c.Meta.IDField, Exceeded: exceeded}
 		ids.IDs = make([]any, len(feats))
 		for i, ft := range feats {
 			ids.IDs[i] = jsonx.Undefined
