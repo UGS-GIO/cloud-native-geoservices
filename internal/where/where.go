@@ -702,16 +702,6 @@ func (e notExpr) eval(row Row) any {
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
-// Fold lower-cases a and b when both are strings, so they compare ignoring case.
-func Fold(a, b any) (any, any) {
-	if sa, ok := a.(string); ok {
-		if sb, ok := b.(string); ok {
-			return strings.ToLower(sa), strings.ToLower(sb)
-		}
-	}
-	return a, b
-}
-
 // compare orders two non-null values of one type, strings ignoring case.
 func compare(a, b any) int {
 	if x, ok := a.(float64); ok {

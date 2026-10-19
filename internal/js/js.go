@@ -1,4 +1,4 @@
-// Package js gives values JavaScript's conversion and comparison rules, which Koop's responses
+// Package js gives values JavaScript's number and string conversions, which Koop's responses
 // depend on: values are nil, bool, int64, float64 or string.
 package js
 
@@ -82,49 +82,6 @@ func Join(v any) string {
 	return String(v)
 }
 
-// IsNullish is v == null, or NaN (which alasql also treats as missing).
-func IsNullish(v any) bool {
-	f, ok := v.(float64)
-	return v == nil || ok && math.IsNaN(f)
-}
-
-// Truthy is Boolean(v).
-func Truthy(v any) bool {
-	switch x := v.(type) {
-	case nil:
-		return false
-	case bool:
-		return x
-	case float64:
-		return x != 0 && !math.IsNaN(x)
-	case int64:
-		return x != 0
-	case string:
-		return x != ""
-	}
-	return true
-}
-
-func bothStrings(a, b any) (string, string, bool) {
-	sa, ok1 := a.(string)
-	sb, ok2 := b.(string)
-	return sa, sb, ok1 && ok2
-}
-
-// StrictEqual is a === b (numbers of either Go type compare by value).
-func StrictEqual(a, b any) bool {
-	if sa, sb, ok := bothStrings(a, b); ok {
-		return sa == sb
-	}
-	if ba, ok := a.(bool); ok {
-		bb, ok := b.(bool)
-		return ok && ba == bb
-	}
-	x, ok1 := AsNumber(a)
-	y, ok2 := AsNumber(b)
-	return ok1 && ok2 && x == y
-}
-
 // AsNumber is v when it is a number.
 func AsNumber(v any) (float64, bool) {
 	switch x := v.(type) {
@@ -134,28 +91,4 @@ func AsNumber(v any) (float64, bool) {
 		return x, true
 	}
 	return 0, false
-}
-
-// LooseEqual is a == b for non-null values.
-func LooseEqual(a, b any) bool {
-	if sa, sb, ok := bothStrings(a, b); ok {
-		return sa == sb
-	}
-	return Number(a) == Number(b)
-}
-
-// Less is a < b.
-func Less(a, b any) bool {
-	if sa, sb, ok := bothStrings(a, b); ok {
-		return sa < sb
-	}
-	return Number(a) < Number(b)
-}
-
-// LessEqual is a <= b.
-func LessEqual(a, b any) bool {
-	if sa, sb, ok := bothStrings(a, b); ok {
-		return sa <= sb
-	}
-	return Number(a) <= Number(b)
 }
