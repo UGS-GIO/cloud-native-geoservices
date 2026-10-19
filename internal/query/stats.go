@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 )
 
@@ -83,7 +82,7 @@ func (a *accumulator) add(v any) {
 		a.max = v
 	}
 	a.count++
-	if x, ok := js.AsNumber(v); ok {
+	if x, ok := asNumber(v); ok {
 		a.sum += x
 		a.sumSq += x * x
 		a.nums++
@@ -114,10 +113,10 @@ func (a *accumulator) result(kind string) any {
 	return v
 }
 
-// number is an integer as a float64, as statistics are written.
+// number is an integer or boolean as a float64, as statistics are written.
 func number(v any) any {
-	if x, ok := v.(int64); ok {
-		return float64(x)
+	if x, ok := asNumber(v); ok {
+		return x
 	}
 	return v
 }

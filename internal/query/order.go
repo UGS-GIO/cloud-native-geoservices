@@ -30,6 +30,14 @@ func (w *winnow) sorted(idx []int) []int {
 	return out
 }
 
+// asNumber is v when it is a number, with booleans as 0 and 1.
+func asNumber(v any) (float64, bool) {
+	if b, ok := v.(bool); ok {
+		return js.Number(b), true
+	}
+	return js.AsNumber(v)
+}
+
 // compareKeys compares two values of one field, null lowest.
 func compareKeys(a, b any, desc bool) int {
 	c := 0
@@ -40,8 +48,8 @@ func compareKeys(a, b any, desc bool) int {
 	case b == nil:
 		c = 1
 	default:
-		x, xok := js.AsNumber(a)
-		y, yok := js.AsNumber(b)
+		x, xok := asNumber(a)
+		y, yok := asNumber(b)
 		sa, _ := a.(string)
 		sb, _ := b.(string)
 		if xok && yok {
