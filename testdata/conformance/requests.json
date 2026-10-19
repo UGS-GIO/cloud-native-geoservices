@@ -139,5 +139,8 @@
 {"name": "features-nogeom-case", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "False"}},
 {"name": "error-bool-number", "params": {"f": "json", "where": "1=1", "returnCountOnly": "1"}},
 {"name": "error-ids-bool-number", "params": {"f": "json", "where": "1=1", "returnIdsOnly": "1"}},
-{"name": "error-returngeometry-number", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "0"}}
+{"name": "error-returngeometry-number", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "0"}},
+{"name": "error-count-fraction", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultRecordCount": "2.5"}},
+{"name": "error-count-negative", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultRecordCount": "-1"}},
+{"name": "error-offset-negative", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultOffset": "-1", "resultRecordCount": "2"}}
 ]

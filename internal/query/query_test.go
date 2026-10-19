@@ -60,6 +60,8 @@ func TestRun(t *testing.T) {
 		{"geometry=-111.9,40.8,-111.8,40.9&spatialRel=esriSpatialRelTouches", "error: 'spatialRel' parameter is invalid"},
 		{"resultRecordCount=abc", `error: "resultRecordCount" must be a number`},
 		{"f=xml", "error: Invalid format"},
+		{"where=1=1&resultRecordCount=2.5", "error: Cannot perform query. Invalid query parameters."},
+		{"where=1=1&resultOffset=-1", "error: Cannot perform query. Invalid query parameters."},
 		{"f=JSON&where=true&returnCountOnly=TRUE", `{"count":3}`},
 		{"where=1=1&returnIdsOnly=True", `{"objectIdFieldName":"feature_id","objectIds":[1,2,3]}`},
 		{"where=1=1&returnIdsOnly=1", "error: "},
