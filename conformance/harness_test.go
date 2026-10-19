@@ -77,7 +77,7 @@ func serve(t testing.TB, dir string, r recorded) *httptest.Server {
 	}
 	p := &provider.Provider{Catalog: catalog.New(catalog.Config{URL: path}, time.Hour),
 		Reader: pq.NewReader(64<<20, 256<<20, 256<<20), Shapes: geom.NewShapes(64 << 20),
-		MaxRecords: r.maxRecords, TileMaxRecords: r.tiles, MaxGeometryRows: 50000}
+		MaxRecords: r.maxRecords, TileMaxRecords: r.tiles, MaxGeometryRows: 50000, PrecisionMM: 1}
 	s := server.New(p, 300, "", server.Limits{MaxWhere: 4096, MaxBody: 1 << 20, MaxObjectIDs: 10000,
 		Timeout: 5 * time.Minute, MaxScans: 2, ScanWait: time.Minute, MaxWork: 8, MaxLight: 8, MaxInFlight: 64,
 		WorkWait: time.Minute}, 0, slog.New(slog.NewTextHandler(io.Discard, nil)))

@@ -55,6 +55,9 @@ type Provider struct {
 	// decode at once, so light requests (deep tiles, identify) keep a CPU.
 	HeavyBytes int64
 	HeavySlots chan struct{}
+	// PrecisionMM rounds JSON coordinates to about this many millimeters when the request does not
+	// set geometryPrecision; 0 keeps full precision.
+	PrecisionMM float64
 	// Mirror, when set, replaces the scheme and host of data URLs: a local directory or another
 	// range-capable server holding the same paths (to measure the server without the CDN).
 	Mirror string
@@ -157,7 +160,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		GeometryType: layer.GeometryType, Fields: layer.Columns, Extent: layer.Extent,
 		MaxRecordCount: int(pr.MaxRecords), TileMaxRecordCount: int(pr.TileMaxRecords), Renderer: style["renderer"], LabelingInfo: style["labelingInfo"],
 		MinScale: style["minScale"], MaxScale: style["maxScale"]}
-	c := &query.Collection{Meta: meta}
+	c := &query.Collection{Meta: meta, PrecisionMM: pr.PrecisionMM}
 	if !isQuery {
 		return c, nil
 	}

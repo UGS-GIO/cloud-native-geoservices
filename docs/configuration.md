@@ -45,6 +45,7 @@ container memory limit. See [Memory sizing](performance.md#memory-sizing).
 | `TILE_MAX_RECORDS` | `8000` | Most features in one page for `resultType=tile`. The layer's `tileMaxRecordCount`. |
 | `MAX_GEOMETRY_ROWS` | `50000` | Rows with geometry that one request reads before `where`. Past it, the response sets `exceededTransferLimit`. |
 | `MAX_RESPONSE_MB` | `30` | Size of a features response before the page ends early with `exceededTransferLimit`. Cloud Run refuses responses over 32 MiB. `0` turns it off. |
+| `COORDINATE_PRECISION_MM` | `1` | Without `geometryPrecision`, JSON and GeoJSON coordinates round to about this many millimeters: 8 decimals in degrees, 3 in meters. Quantized and PBF output is not changed. `0` keeps full precision. |
 | `MAX_WHERE_LENGTH` | `4096` | Characters in `where` |
 | `MAX_BODY_BYTES` | `1048576` | Bytes in a POST body |
 | `MAX_OBJECT_IDS` | `10000` | Ids in `objectIds` |
