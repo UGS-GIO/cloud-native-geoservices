@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -151,5 +152,14 @@ func TestMirror(t *testing.T) {
 	}
 	if got := (&Provider{}).dataURL("https://x/a.parquet"); got != "https://x/a.parquet" {
 		t.Errorf("no mirror %s", got)
+	}
+}
+
+func TestLevels(t *testing.T) {
+	tol := func(f float64) *float64 { return &f }
+	item := &catalog.Item{Assets: []catalog.Asset{{Key: "data"}, {Key: "overview_1", Tolerance: tol(0.00068)},
+		{Key: "overview_2", Tolerance: tol(0.0027)}, {Key: "overview_3", Tolerance: tol(0.0108)}}}
+	if got := levels(item); !slices.Equal(got, []int{7, 9, 11}) {
+		t.Errorf("levels %v", got)
 	}
 }

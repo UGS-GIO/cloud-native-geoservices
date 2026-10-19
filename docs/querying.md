@@ -58,7 +58,7 @@ and `esriSpatialRelWithin` means "the query geometry is within the feature".
 | `outFields` | Comma list, or `*` (default). Names match in any case. An unknown field gives error 400. |
 | `returnGeometry` | `true` (default) or `false` |
 | `outSR` | See [spatial references](#spatial-references) |
-| `geometryPrecision` | Decimal places. 0 or less rounds to whole numbers. More than 20 keeps full precision. |
+| `geometryPrecision` | Decimal places. 0 or less rounds to whole numbers. More than 20 keeps full precision. Without it, JSON coordinates round to about 1 mm (`COORDINATE_PRECISION_MM`). |
 | `maxAllowableOffset` | Simplification tolerance, in the units of `outSR`. Picks the simplification level and the [overview](layer-sources.md#overviews). Ignored for point layers. |
 | `orderByFields` | For example `name ASC, age DESC`. See [ordering](#ordering). |
 | `resultOffset`, `resultRecordCount` | Paging. Whole numbers, 0 or more, else error 400. See [paging](#paging). |
@@ -80,7 +80,8 @@ and `esriSpatialRelWithin` means "the query geometry is within the feature".
 | `pbf` | `application/x-protobuf` | Esri FeatureCollection protocol buffer, as Map Viewer requests it |
 
 A query response writes `exceededTransferLimit` only when it is `true`, and leaves out `hasZ` and
-`hasM`.
+`hasM`. A response over 16 MiB is sent with chunked transfer encoding instead of a
+`Content-Length`, because Cloud Run refuses a larger HTTP/1 body that has one.
 
 With `f=geojson`, every feature has `type`, `geometry` (`null` when `returnGeometry=false`) and
 `properties`, and `id` when the id field is in the output. A count, ids or an extent is a

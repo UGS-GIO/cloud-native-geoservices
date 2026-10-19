@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func fixtureAt(t testing.TB, base, compression string) *httptest.Server {
 	path := filepath.Join(t.TempDir(), "items.json")
 	os.WriteFile(path, []byte(strings.ReplaceAll(string(items), `"testdata/`, `"`+base+"/")), 0o644)
 	p := &provider.Provider{Catalog: catalog.New(catalog.STAC{URL: path}, time.Minute), Reader: pq.NewReader(32<<20, 64<<20, 64<<20),
-		Shapes: geom.NewShapes(16 << 20), MaxRecords: 2000, TileMaxRecords: 8000, MaxGeometryRows: 50000}
+		Shapes: geom.NewShapes(16 << 20), MaxRecords: 2000, TileMaxRecords: 8000, MaxGeometryRows: 50000, PrecisionMM: 1}
 	s := New(p, 300, "", Limits{MaxWhere: 100, MaxBody: 1024, MaxObjectIDs: 5, Timeout: 10 * time.Second,
 		MaxScans: 1, ScanWait: time.Second, MaxWork: 2, MaxLight: 4, MaxInFlight: 64, WorkWait: time.Second}, 8<<20, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := s.Compress(compression); err != nil {
@@ -105,6 +106,61 @@ func TestQueries(t *testing.T) {
 	_, body = get(t, ts.URL+"/ugs/rest/services/wells/nope/FeatureServer/0?f=json")
 	if e, _ := body["error"].(map[string]any); e["message"] != "unknown render 'nope' for wells (have: by-purpose, by-boxtype)" {
 		t.Errorf("unknown render: %v", body)
+	}
+}
+
+func TestStream(t *testing.T) {
+	defer func(n int) { streamOver = n }(streamOver)
+	streamOver = 4 << 10
+	ts := fixture(t)
+	q := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?where=1=1&"
+	for _, tt := range []struct {
+		query, coding string
+		chunked       bool
+	}{{"resultRecordCount=50", "", true}, {"resultRecordCount=50", "gzip", true}, {"returnCountOnly=true", "", false}} {
+		res, _ := get(t, q+tt.query, "Accept-Encoding", tt.coding)
+		chunked := slices.Contains(res.TransferEncoding, "chunked") && res.ContentLength == -1
+		if res.StatusCode != 200 || chunked != tt.chunked {
+			t.Errorf("%s %q: status %d, transfer %v, length %d", tt.query, tt.coding, res.StatusCode, res.TransferEncoding, res.ContentLength)
+		}
+	}
+}
+
+func TestDefaultPrecision(t *testing.T) {
+	ts := fixture(t)
+	q := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?where=1=1&resultRecordCount=5&f=json"
+	for _, tt := range []struct {
+		query string
+		most  int
+	}{{"", 8}, {"&outSR=102100", 3}, {"&geometryPrecision=2", 2}, {"&geometryPrecision=21", 15}} {
+		res, err := http.Get(q + tt.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Features []struct {
+				Geometry struct{ Rings [][][]json.Number }
+			}
+		}
+		d := json.NewDecoder(res.Body)
+		d.UseNumber()
+		d.Decode(&body)
+		res.Body.Close()
+		most := 0
+		for _, f := range body.Features {
+			for _, ring := range f.Geometry.Rings {
+				for _, pt := range ring {
+					for _, n := range pt {
+						if _, frac, ok := strings.Cut(n.String(), "."); ok {
+							most = max(most, len(frac))
+						}
+					}
+				}
+			}
+		}
+		if most > tt.most || tt.most == 15 && most <= 8 {
+			t.Errorf("%q: %d decimals, want at most %d", tt.query, most, tt.most)
+		}
 	}
 }
 

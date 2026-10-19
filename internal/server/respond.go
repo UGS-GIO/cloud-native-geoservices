@@ -23,6 +23,9 @@ import (
 
 const jsonType = "application/json; charset=utf-8"
 
+// streamOver is the largest body sent with a Content-Length.
+var streamOver = 16 << 20
+
 // encoded is a response body ready to send, and what the encoded-response cache holds.
 type encoded struct {
 	body        []byte // nil when only the compressed form is kept
@@ -128,10 +131,20 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, out *encoded, tag 
 			h.Set("ETag", codedTag(tag, c))
 		}
 	}
-	h.Set("Content-Length", strconv.Itoa(len(body)))
+	// Cloud Run refuses an HTTP/1 body over 32 MiB unless it is chunked, so a large one streams.
+	if len(body) <= streamOver {
+		h.Set("Content-Length", strconv.Itoa(len(body)))
+	}
 	w.WriteHeader(http.StatusOK)
-	if r.Method != http.MethodHead {
-		w.Write(body)
+	if r.Method == http.MethodHead {
+		return
+	}
+	rc := http.NewResponseController(w)
+	for len(body) > 0 {
+		n := min(len(body), 1<<20)
+		w.Write(body[:n])
+		rc.Flush()
+		body = body[n:]
 	}
 }
 

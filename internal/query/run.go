@@ -272,6 +272,7 @@ type winnow struct {
 	toSR       orb.Projection // outSR's projection, nil for lon/lat
 	geometry   bool           // returnGeometry
 	precision  *int
+	scale      float64                   // without geometryPrecision, coordinates round to 1/scale; 0 keeps them
 	project    func(orb.Point) orb.Point // outGeometry's, once worked out
 	aggregates []aggregate
 	groupBy    []string
@@ -392,9 +393,16 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 		w.geometry = false
 	}
 	// AGOL rounds a negative precision as 0, and past 20 digits keeps full precision.
-	if n, ok := p.Number("geometryPrecision"); ok && n <= 20 {
+	n, set := p.Number("geometryPrecision")
+	if set && n <= 20 {
 		v := max(int(n), 0)
 		w.precision = &v
+	} else if _, q := p["quantizationParameters"]; !set && c.PrecisionMM > 0 && p.Format() != "pbf" && !q {
+		perMM := 1e3 / c.PrecisionMM // a millimeter is 1e-3 m, or about 1e-8 degrees
+		if !geom.Mercator[w.outSR.Wkid] {
+			perMM *= 111320
+		}
+		w.scale = math.Pow(10, math.Round(math.Log10(perMM)))
 	}
 	return w, nil
 }
@@ -485,7 +493,7 @@ func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
 	}
 	if w.project == nil {
 		w.project = w.outPoint
-		if w.precision == nil {
+		if w.precision == nil && w.scale == 0 {
 			w.project = w.toSR
 		}
 		if w.project == nil {
@@ -502,6 +510,8 @@ func (w *winnow) outPoint(p orb.Point) orb.Point {
 	}
 	if w.precision != nil {
 		p = orb.Point{toFixed(p[0], *w.precision), toFixed(p[1], *w.precision)}
+	} else if w.scale > 0 {
+		p = orb.Point{math.Round(p[0]*w.scale) / w.scale, math.Round(p[1]*w.scale) / w.scale}
 	}
 	return p
 }

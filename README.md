@@ -57,7 +57,8 @@ fields are also read:
   Each render is a separate FeatureServer.
 - Assets whose key starts with `overview` and that have `ugs:simplify_tolerance` (degrees): a
   generalized copy of the data. A small-scale request reads the coarsest overview that is still
-  finer than the request.
+  finer than the request. The layer lists the overviews' zoom levels in `multiScaleGeometryInfo`,
+  as an ArcGIS Online layer with optimized drawing does.
 
 **Config.** URLs that are relative are resolved against the location of the config file.
 
@@ -101,6 +102,7 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 | `COMPRESSION` | gzip | content codings offered, most preferred first: `gzip`, `br`, `zstd` |
 | `MAX_RECORDS` / `TILE_MAX_RECORDS` | 2000 / 8000 | page size; tile page size |
 | `MAX_GEOMETRY_ROWS` | 50000 | geometries one request reads before `where` |
+| `COORDINATE_PRECISION_MM` | 1 | without `geometryPrecision`, JSON coordinates round to about this (8 decimals in degrees, 3 in meters); 0 keeps full precision |
 | `MAX_WHERE_LENGTH` | 4096 | characters |
 | `MAX_BODY_BYTES` | 1048576 | POST body |
 | `MAX_OBJECT_IDS` | 10000 | ids in `objectIds` |
@@ -149,7 +151,8 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 Values are read as ArcGIS Online reads them: booleans and `f` in any case, and a boolean other
 than true or false, or a fractional or negative `resultRecordCount`, is a 400. A page of features
 is at most `MAX_RECORDS`, with or without geometry (`TILE_MAX_RECORDS` for `resultType=tile`),
-and `exceededTransferLimit` is written only when more features match than the page holds.
+and `exceededTransferLimit` is written only when more features match than the page holds. A body
+over 16 MiB is sent chunked, without `Content-Length`, so Cloud Run sends it whole.
 
 The server has no token security: `/ugs/rest/info` reports `isTokenBasedSecurity: false`, as an
 ArcGIS Server without security does.

@@ -24,6 +24,7 @@ type Collection struct {
 	Props          []string
 	Features       []Feature
 	Exceeded       bool
+	PrecisionMM    float64         // JSON coordinates round to about this without geometryPrecision; 0 keeps them
 	FiltersApplied map[string]bool // offset, limit, resultRecordCount, orderByFields
 	Count          *int64          // precalculated: the file's row count
 	Extent         jsonx.Obj       // precalculated: the file's extent

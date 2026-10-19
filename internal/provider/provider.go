@@ -55,6 +55,9 @@ type Provider struct {
 	// decode at once, so light requests (deep tiles, identify) keep a CPU.
 	HeavyBytes int64
 	HeavySlots chan struct{}
+	// PrecisionMM rounds JSON coordinates to about this many millimeters when the request does not
+	// set geometryPrecision; 0 keeps full precision.
+	PrecisionMM float64
 	// Mirror, when set, replaces the scheme and host of data URLs: a local directory or another
 	// range-capable server holding the same paths (to measure the server without the CDN).
 	Mirror string
@@ -156,8 +159,8 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	meta := &esri.Metadata{Name: name, Description: item.Description, IDField: "feature_id",
 		GeometryType: layer.GeometryType, Fields: layer.Columns, Extent: layer.Extent,
 		MaxRecordCount: int(pr.MaxRecords), TileMaxRecordCount: int(pr.TileMaxRecords), Renderer: style["renderer"], LabelingInfo: style["labelingInfo"],
-		MinScale: style["minScale"], MaxScale: style["maxScale"]}
-	c := &query.Collection{Meta: meta}
+		MinScale: style["minScale"], MaxScale: style["maxScale"], Levels: levels(item)}
+	c := &query.Collection{Meta: meta, PrecisionMM: pr.PrecisionMM}
 	if !isQuery {
 		return c, nil
 	}
@@ -598,6 +601,19 @@ func firstPoint(g orb.Geometry) (orb.Point, bool) {
 // rank features by how much they cover.
 func spread(b orb.Bound) float64 {
 	return (b.Max[0] - b.Min[0]) + (b.Max[1] - b.Min[1])
+}
+
+// levels are the zoom levels of the item's overviews, as AGOL's optimized drawing lists them: an
+// overview's tolerance is about one pixel (1.40625 / 2^z degrees) at its level.
+func levels(item *catalog.Item) []int {
+	var zs []int
+	for _, a := range item.Assets {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil && *a.Tolerance > 0 {
+			zs = append(zs, min(max(int(math.Round(math.Log2(1.40625 / *a.Tolerance))), 1), 17))
+		}
+	}
+	slices.Sort(zs)
+	return slices.Compact(zs)
 }
 
 func overview(item *catalog.Item, tolerance float64) string {

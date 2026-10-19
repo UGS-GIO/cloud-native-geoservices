@@ -44,6 +44,7 @@ container memory limit. See [Memory sizing](performance.md#memory-sizing).
 | `MAX_RECORDS` | `2000` | Most features in one page, with or without geometry. A larger `resultRecordCount` gets this many. The layer's `maxRecordCount`. |
 | `TILE_MAX_RECORDS` | `8000` | Most features in one page for `resultType=tile`. The layer's `tileMaxRecordCount`. |
 | `MAX_GEOMETRY_ROWS` | `50000` | Rows with geometry that one request reads before `where`. Past it, the response sets `exceededTransferLimit`. |
+| `COORDINATE_PRECISION_MM` | `1` | Without `geometryPrecision`, JSON and GeoJSON coordinates round to about this many millimeters: 8 decimals in degrees, 3 in meters. Quantized and PBF output is not changed. `0` keeps full precision. |
 | `MAX_WHERE_LENGTH` | `4096` | Characters in `where` |
 | `MAX_BODY_BYTES` | `1048576` | Bytes in a POST body |
 | `MAX_OBJECT_IDS` | `10000` | Ids in `objectIds` |

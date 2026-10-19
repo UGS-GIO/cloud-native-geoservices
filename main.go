@@ -138,6 +138,7 @@ func main() {
 		GeometryBudget:  semaphore.NewWeighted(geometryBudget),
 		BudgetBytes:     geometryBudget,
 		BudgetWait:      time.Duration(envInt("BUDGET_WAIT_MS", 5000)) * time.Millisecond,
+		PrecisionMM:     float64(envInt("COORDINATE_PRECISION_MM", 1)),
 		Mirror:          env("DATA_MIRROR", ""),
 		HeavyBytes:      envInt("HEAVY_MB", 8) << 20,
 		HeavySlots:      make(chan struct{}, max(1, envInt("HEAVY_SLOTS", int64(runtime.GOMAXPROCS(0)-1)))),
