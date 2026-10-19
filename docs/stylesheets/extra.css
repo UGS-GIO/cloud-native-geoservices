@@ -1,0 +1,4 @@
+/* Keep variable and parameter names in the first table column on one line. */
+.md-typeset td:first-child code {
+  white-space: nowrap;
+}
