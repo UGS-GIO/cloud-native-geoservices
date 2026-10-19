@@ -80,7 +80,8 @@ and `esriSpatialRelWithin` means "the query geometry is within the feature".
 | `pbf` | `application/x-protobuf` | Esri FeatureCollection protocol buffer, as Map Viewer requests it |
 
 A query response writes `exceededTransferLimit` only when it is `true`, and leaves out `hasZ` and
-`hasM`.
+`hasM`. A response over 16 MiB is sent with chunked transfer encoding instead of a
+`Content-Length`, because Cloud Run refuses a larger HTTP/1 body that has one.
 
 With `f=geojson`, every feature has `type`, `geometry` (`null` when `returnGeometry=false`) and
 `properties`, and `id` when the id field is in the output. A count, ids or an extent is a
