@@ -55,8 +55,8 @@ func load(t testing.TB, dir string, layers []Layer) []recorded {
 	return out
 }
 
-// serve serves the layers' copies with main's default limits and the reference's page sizes.
-func serve(t testing.TB, dir string, recs []recorded) *httptest.Server {
+// serve serves a layer's copy with main's default limits and the reference's page sizes.
+func serve(t testing.TB, dir string, r recorded) *httptest.Server {
 	type layer struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
@@ -65,13 +65,11 @@ func serve(t testing.TB, dir string, recs []recorded) *httptest.Server {
 	var cfg struct {
 		Layers []layer `json:"layers"`
 	}
-	for _, r := range recs {
-		abs, err := filepath.Abs(DataPath(dir, r.Layer.Name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		cfg.Layers = append(cfg.Layers, layer{r.Layer.Name, r.title, abs})
+	abs, err := filepath.Abs(DataPath(dir, r.Layer.Name))
+	if err != nil {
+		t.Fatal(err)
 	}
+	cfg.Layers = append(cfg.Layers, layer{r.Layer.Name, r.title, abs})
 	b, _ := json.Marshal(cfg)
 	path := filepath.Join(t.TempDir(), "layers.json")
 	if err := os.WriteFile(path, b, 0o644); err != nil {
@@ -79,7 +77,7 @@ func serve(t testing.TB, dir string, recs []recorded) *httptest.Server {
 	}
 	p := &provider.Provider{Catalog: catalog.New(catalog.Config{URL: path}, time.Hour),
 		Reader: pq.NewReader(64<<20, 256<<20, 256<<20), Shapes: geom.NewShapes(64 << 20),
-		MaxRecords: recs[0].maxRecords, TileMaxRecords: recs[0].tiles, MaxGeometryRows: 50000}
+		MaxRecords: r.maxRecords, TileMaxRecords: r.tiles, MaxGeometryRows: 50000}
 	s := server.New(p, 300, "", server.Limits{MaxWhere: 4096, MaxBody: 1 << 20, MaxObjectIDs: 10000,
 		Timeout: 5 * time.Minute, MaxScans: 2, ScanWait: time.Minute, MaxWork: 8, MaxLight: 8, MaxInFlight: 64,
 		WorkWait: time.Minute}, 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -132,7 +130,6 @@ func check(t *testing.T, dir, gapsPath string, layers []Layer) []timing {
 		t.Fatal(err)
 	}
 	recs := load(t, dir, layers)
-	ts := serve(t, dir, recs)
 	type pattern struct {
 		gap *Gap
 		i   int
@@ -140,6 +137,7 @@ func check(t *testing.T, dir, gapsPath string, layers []Layer) []timing {
 	used := map[pattern]bool{}
 	var times []timing
 	for _, rec := range recs {
+		ts := serve(t, dir, rec)
 		for _, r := range rec.Responses {
 			status, body, pbf, took := ask(t, ts.URL, rec.Layer.Name, r.Request)
 			times = append(times, timing{rec.Layer.Name + "/" + r.Name, time.Duration(r.Millis) * time.Millisecond, took})

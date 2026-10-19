@@ -15,9 +15,9 @@ type Answer struct {
 }
 
 // Normalize parses an answer and removes the differences that carry no meaning: the object id
-// field's name, row order where the request sets none, ring start points and part order, and
-// Web Mercator where the request names no outSR (the reference stores Web Mercator, the copy
-// EPSG:4326).
+// field's name, false or null flags that clients read as a missing key, row order where the
+// request sets none, ring start points and part order, and Web Mercator where the request names
+// no outSR (the reference stores Web Mercator, the copy EPSG:4326).
 func Normalize(req Request, status int, body []byte, pbf bool, idField string) (Answer, error) {
 	var a Answer
 	var err error
@@ -36,6 +36,11 @@ func Normalize(req Request, status int, body []byte, pbf bool, idField string) (
 		a.Tree = renameID(a.Tree, idField, false).(map[string]any)
 	}
 	a.Tree["_status"] = float64(status)
+	for _, k := range []string{"exceededTransferLimit", "hasZ", "hasM"} {
+		if v, ok := a.Tree[k]; ok && (v == nil || v == false) {
+			delete(a.Tree, k)
+		}
+	}
 	if _, ok := req.Params["outSR"]; !ok {
 		if isMercator(a.Tree["spatialReference"]) {
 			a.Quantum /= metersPerDegree

@@ -5,11 +5,6 @@
    "*/error-*: error.details* (*)"],
    "reason": "Error messages and details are free text; the error code is compared."},
   {"match": [
-   "*: exceededTransferLimit (extra)",
-   "*: hasZ (extra)",
-   "*: hasM (extra)"],
-   "reason": "We write false where Esri leaves the key out; clients read a missing key as false."},
-  {"match": [
    "*: fields[*].sqlType (value)"],
    "reason": "Clients do not read sqlType, and AGOL writes sqlTypeOther for almost every field."},
   {"match": [

@@ -135,11 +135,15 @@ func names(arr []any) ([]string, map[string]any, bool) {
 	return keys, by, true
 }
 
+// rowKeys keys rows by object id, or reports false when a row has none or shares one.
 func rowKeys(arr []any) (map[string]any, bool) {
 	by := map[string]any{}
 	for _, v := range arr {
 		k := rowKey(v)
 		if k == nil {
+			return nil, false
+		}
+		if _, dup := by[show(k)]; dup {
 			return nil, false
 		}
 		by[show(k)] = v
@@ -171,6 +175,9 @@ func (d *differ) array(path string, ref, ours []any, geom bool) {
 			return
 		}
 	}
+	if len(ref) != len(ours) {
+		d.add(path, "length", len(ref), len(ours))
+	}
 	if !d.ordered || len(ref) != len(ours) {
 		if rb, ok := rowKeys(ref); ok {
 			if ob, ok := rowKeys(ours); ok {
@@ -191,7 +198,6 @@ func (d *differ) array(path string, ref, ours []any, geom bool) {
 		}
 	}
 	if len(ref) != len(ours) {
-		d.add(path, "length", len(ref), len(ours))
 		return
 	}
 	for i := range ref {

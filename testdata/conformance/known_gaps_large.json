@@ -5,11 +5,6 @@
    "*/error-*: error.details* (*)"],
    "reason": "Error messages and details are free text; the error code is compared."},
   {"match": [
-   "*: exceededTransferLimit (extra)",
-   "*: hasZ (extra)",
-   "*: hasM (extra)"],
-   "reason": "We write false where Esri leaves the key out; clients read a missing key as false."},
-  {"match": [
    "*: fields[*].sqlType (value)"],
    "reason": "Clients do not read sqlType, and AGOL writes sqlTypeOther for almost every field."},
   {"match": [
@@ -103,10 +98,11 @@
    "rail_lines/extent-3857: extent.* (value)"],
    "reason": "returnExtentOnly with a where whose matches span more than MAX_GEOMETRY_ROWS (50000) rows gives the extent of only part of them, not an error."},
   {"match": [
+   "*/features-where: features (length)",
    "*/features-where: features[] (extra)",
-   "*/features-where: exceededTransferLimit (value)",
+   "*/features-where: exceededTransferLimit (missing)",
    "*/distinct-two: features (length)",
-   "*/distinct-two: exceededTransferLimit (value)"],
+   "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
   {"match": [
    "*/count-extent: extent.xmin (value)",
