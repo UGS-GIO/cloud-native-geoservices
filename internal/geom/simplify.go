@@ -310,6 +310,9 @@ func members[S ~[]T, T any](r *reader, n, dims int, read func(int) (T, error)) (
 	return out, nil
 }
 
+// poolPoints caps the scratch a pooled reader keeps, so one huge geometry is not held onto.
+const poolPoints = 1 << 16
+
 // FromWKB reads WKB into a 2D geometry simplified to tolerance (degrees); ok is false for no
 // geometry. Points the simplifier drops are never allocated.
 func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
@@ -317,7 +320,11 @@ func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
 		return Shape{}, false, nil
 	}
 	r := readers.Get().(*reader)
-	defer readers.Put(r)
+	defer func() {
+		if cap(r.xs) <= poolPoints {
+			readers.Put(r)
+		}
+	}()
 	r.b, r.off, r.whole, r.tol = b, 0, false, tolerance
 	g, err := r.geometry()
 	r.b = nil
