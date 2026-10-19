@@ -23,8 +23,8 @@ func Normalize(req Request, status int, body []byte, pbf bool, idField string) (
 	var err error
 	if pbf {
 		a.Tree, a.Quantum, err = DecodePBF(body)
-	} else {
-		err = json.Unmarshal(body, &a.Tree)
+	} else if err = json.Unmarshal(body, &a.Tree); err == nil {
+		a.Quantum = dequantize(a.Tree)
 	}
 	if err != nil {
 		return a, fmt.Errorf("%s: %w", req.Name, err)
@@ -56,10 +56,64 @@ func Normalize(req Request, status int, body []byte, pbf bool, idField string) (
 			sortRows(features)
 		}
 	}
-	if ids, ok := a.Tree["objectIds"].([]any); ok {
-		slices.SortFunc(ids, compareAny)
+	props, _ := a.Tree["properties"].(map[string]any)
+	for _, m := range []map[string]any{a.Tree, props} {
+		if ids, ok := m["objectIds"].([]any); ok {
+			slices.SortFunc(ids, compareAny)
+		}
 	}
 	return a, nil
+}
+
+// dequantize turns an f=json answer's quantized geometries and centroids back into coordinates,
+// as DecodePBF does, and returns the largest step of its transform.
+func dequantize(tree map[string]any) float64 {
+	t, _ := tree["transform"].(map[string]any)
+	scale, _ := t["scale"].([]any)
+	translate, _ := t["translate"].([]any)
+	if len(scale) < 2 || len(translate) < 2 {
+		return 0
+	}
+	sx, _ := scale[0].(float64)
+	sy, _ := scale[1].(float64)
+	tx, _ := translate[0].(float64)
+	ty, _ := translate[1].(float64)
+	if t["originPosition"] != "lowerLeft" {
+		sy = -sy
+	}
+	point := func(x, y float64) (float64, float64) { return tx + x*sx, ty + y*sy }
+	features, _ := tree["features"].([]any)
+	for _, f := range features {
+		fm, _ := f.(map[string]any)
+		g, _ := fm["geometry"].(map[string]any)
+		eachPoint(fm["centroid"], point)
+		if _, ok := g["x"]; ok {
+			eachPoint(g, point)
+		}
+		parts, _ := g["paths"].([]any)
+		if r, ok := g["rings"].([]any); ok {
+			parts = r
+		}
+		if pts, ok := g["points"].([]any); ok {
+			parts = []any{pts}
+		}
+		for _, part := range parts {
+			var x, y float64
+			pts, _ := part.([]any)
+			for i, p := range pts {
+				xy, _ := p.([]any)
+				if len(xy) < 2 {
+					continue
+				}
+				dx, _ := xy[0].(float64)
+				dy, _ := xy[1].(float64)
+				x, y = x+dx, y+dy
+				px, py := point(x, y)
+				pts[i] = []any{px, py}
+			}
+		}
+	}
+	return math.Max(math.Abs(sx), math.Abs(sy))
 }
 
 // renameID names the object id field feature_id in keys and names, but not in attribute values.
@@ -68,7 +122,8 @@ func renameID(v any, id string, inAttributes bool) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, child := range x {
-			attrs := inAttributes || k == "attributes" || k == "properties"
+			// A FeatureCollection's own properties (ids, count) are not attributes.
+			attrs := inAttributes || k == "attributes" || k == "properties" && x["type"] != "FeatureCollection"
 			out[strings.ReplaceAll(k, id, "feature_id")] = renameID(child, id, attrs)
 		}
 		return out

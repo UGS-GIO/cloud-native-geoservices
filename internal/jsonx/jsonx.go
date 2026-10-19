@@ -1,5 +1,5 @@
-// Package jsonx writes JSON the way JavaScript's JSON.stringify does: object keys keep their
-// insertion order, numbers print like Number#toString, and undefined values are left out.
+// Package jsonx writes JSON with object keys in insertion order and numbers printed like
+// JavaScript's Number#toString, the shortest form that reads back the same.
 package jsonx
 
 import (
@@ -18,14 +18,6 @@ type KV struct {
 
 // Obj is a JSON object whose keys print in insertion order.
 type Obj []KV
-
-// Undefined is a value JSON.stringify drops from objects (and prints as null in arrays).
-type undefined struct{}
-
-var Undefined = undefined{}
-
-// IsUndefined reports the Undefined value.
-func IsUndefined(v any) bool { _, ok := v.(undefined); return ok }
 
 // Raw is already-encoded JSON, written as is.
 type Raw = json.RawMessage
@@ -60,7 +52,7 @@ type Appender interface{ AppendJSON([]byte) []byte }
 // Append encodes v onto buf.
 func Append(buf []byte, v any) []byte {
 	switch x := v.(type) {
-	case nil, undefined:
+	case nil:
 		return append(buf, "null"...)
 	case bool:
 		return strconv.AppendBool(buf, x)
@@ -86,15 +78,10 @@ func Append(buf []byte, v any) []byte {
 		return x.AppendJSON(buf)
 	case Obj:
 		buf = append(buf, '{')
-		first := true
-		for _, kv := range x {
-			if _, skip := kv.V.(undefined); skip {
-				continue
-			}
-			if !first {
+		for i, kv := range x {
+			if i > 0 {
 				buf = append(buf, ',')
 			}
-			first = false
 			buf = AppendString(buf, kv.K)
 			buf = append(buf, ':')
 			buf = Append(buf, kv.V)

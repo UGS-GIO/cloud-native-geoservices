@@ -55,15 +55,15 @@ func TestCountAndPage(t *testing.T) {
 		t.Errorf("count from the footer: %v", c.Count)
 	}
 	c := load(t, pr, "qfaults", query.Raw{"resultOffset": "295", "resultRecordCount": "10"})
-	if len(c.Features) != 5 || c.Exceeded != query.False || !c.FiltersApplied["offset"] {
+	if len(c.Features) != 5 || c.Exceeded || !c.FiltersApplied["offset"] {
 		t.Errorf("last page: %d features, exceeded %v", len(c.Features), c.Exceeded)
 	}
 	c = load(t, pr, "qfaults", query.Raw{"resultRecordCount": "10"})
-	if len(c.Features) != 10 || c.Exceeded != query.True {
+	if len(c.Features) != 10 || !c.Exceeded {
 		t.Errorf("a full page says there is more: %d %v", len(c.Features), c.Exceeded)
 	}
 	c = load(t, pr, "qfaults", query.Raw{"where": "objectid > 0", "returnGeometry": "false"})
-	if c.Exceeded != query.Null || len(c.Features) != 300 || c.Features[0].Geom != nil {
+	if c.Exceeded || len(c.Features) != 300 || c.Features[0].Geom != nil {
 		t.Errorf("unpaged: exceeded %v, %d features", c.Exceeded, len(c.Features))
 	}
 }
@@ -127,7 +127,7 @@ func TestTile(t *testing.T) {
 	// the response is not flagged exceeded.
 	params := query.Raw{"geometry": "-115,36,-108,43", "resultType": "tile", "maxAllowableOffset": "0.01"}
 	c := load(t, pr, "geolunits", params)
-	if len(c.Features) != 5 || c.Exceeded != query.False {
+	if len(c.Features) != 5 || c.Exceeded {
 		t.Fatalf("%d features, exceeded %v", len(c.Features), c.Exceeded)
 	}
 	for i := 1; i < len(c.Features); i++ {

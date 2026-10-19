@@ -1,6 +1,6 @@
-// Package query does what Koop's FeatureServer and winnow did with a provider's features:
-// validate the request, filter by where, ids and geometry, order, page, compute statistics,
-// project, and shape the Esri JSON, GeoJSON or PBF response.
+// Package query answers a query over a provider's features as ArcGIS Online does: validate the
+// request, filter by where, ids and geometry, order, page, compute statistics, project, and
+// shape the Esri JSON, GeoJSON or PBF response.
 package query
 
 import (
@@ -14,8 +14,8 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 )
 
-// Params are the request parameters as Koop normalizes them: body then query (query wins),
-// empty strings dropped, "true"/"false" as booleans and anything that parses as JSON parsed.
+// Params are the request parameters: body then query (query wins), empty strings dropped,
+// booleans and f in any case, text kept as text, and anything else that parses as JSON parsed.
 type Params map[string]any
 
 // Raw is the same request as strings, with the same precedence, so the plan, the limits and the
@@ -28,7 +28,7 @@ func Normalize(query, body url.Values) (Params, Raw) {
 	for _, src := range []url.Values{body, query} {
 		for k, v := range src {
 			if v[0] != "" {
-				raw[k], p[k] = v[0], coerce(v[0])
+				raw[k], p[k] = read(k, v[0])
 			} else if raw[k] == "" {
 				raw[k] = v[0]
 			}
@@ -37,13 +37,30 @@ func Normalize(query, body url.Values) (Params, Raw) {
 	return p, raw
 }
 
-func coerce(s string) any {
-	switch s {
-	case "true":
-		return true
-	case "false":
-		return false
+// booleans are read as true or false in any case; any other value is a 400.
+var booleans = []string{"returnGeometry", "returnCountOnly", "returnIdsOnly", "returnExtentOnly", "returnDistinctValues"}
+
+// text parameters are never parsed as JSON.
+var text = []string{"where", "outFields", "orderByFields", "groupByFieldsForStatistics"}
+
+func read(k, s string) (string, any) {
+	switch {
+	case k == "f":
+		s = strings.ToLower(s)
+		return s, s
+	case slices.Contains(text, k):
+		return s, s
+	case slices.Contains(booleans, k):
+		switch b := strings.ToLower(strings.TrimSpace(s)); b {
+		case "true", "false":
+			return b, b == "true"
+		}
+		return s, s
 	}
+	return s, coerce(s)
+}
+
+func coerce(s string) any {
 	var v any
 	if json.Unmarshal([]byte(s), &v) == nil {
 		return v
@@ -91,7 +108,7 @@ func Bad(msg string, details ...string) *Error {
 
 func isInt(f float64) bool { return f == math.Trunc(f) && !math.IsInf(f, 0) }
 
-// Validate checks the parameters Koop's query schema checks.
+// Validate rejects the parameter values ArcGIS Online rejects.
 func (p Params) Validate() error {
 	if v, ok := p["f"]; ok {
 		s, _ := v.(string)
@@ -101,12 +118,22 @@ func (p Params) Validate() error {
 			return Bad("Invalid format", `"f" must be one of [json, pjson, pbf, geojson]`)
 		}
 	}
-	for _, c := range [][2]string{{"resultRecordCount", "number"}, {"resultOffset", "number"},
-		{"returnGeometry", "boolean"}, {"returnCountOnly", "boolean"}, {"outFields", "string"}, {"orderByFields", "string"}} {
-		if v, ok := p[c[0]]; ok && typeOf(v) != c[1] {
-			m := `"` + c[0] + `" must be a ` + c[1]
+	for _, k := range booleans {
+		if v, ok := p[k]; ok && typeOf(v) != "boolean" {
+			return Bad("", "'"+k+"' parameter is invalid")
+		}
+	}
+	for _, k := range []string{"resultRecordCount", "resultOffset"} {
+		if v, ok := p[k]; ok && typeOf(v) != "number" {
+			m := `"` + k + `" must be a number`
 			return Bad(m, m)
 		}
+		if n, ok := p.Number(k); ok && (!isInt(n) || n < 0) {
+			return Bad("Cannot perform query. Invalid query parameters.", "'"+k+"' parameter is invalid")
+		}
+	}
+	if v, ok := p["geometryPrecision"]; ok && typeOf(v) != "number" {
+		return Bad("", "'geometryPrecision' parameter is invalid")
 	}
 	if w, _ := p.String("where"); strings.TrimSpace(w) == "" && !p.has("objectIds", "geometry", "outStatistics", "time") {
 		return Bad("No where clause specified")
@@ -124,8 +151,8 @@ func (p Params) Validate() error {
 		}
 	}
 	if v, ok := p["quantizationParameters"]; ok {
-		if _, ok := ParseQuantization(v); !ok {
-			return Bad("'quantizationParameters' parameter is invalid", `"quantizationParameters" must be of type object`)
+		if _, err := ParseQuantization(v); err != nil {
+			return err
 		}
 	}
 	if v, ok := p["spatialRel"]; ok {
@@ -174,46 +201,61 @@ func supported(id int) bool {
 	return false
 }
 
-// Quantization is the PBF transform a client asks for.
+// Quantization is a client's quantizationParameters.
 type Quantization struct {
-	Scale                  float64
-	XTranslate, YTranslate float64
-	OriginPosition         string
-	HasOrigin              bool
+	Edit, LowerLeft bool
+	Tolerance       float64     // 0 when not given
+	Extent          *[4]float64 // nil when not given
+	ExtentSR        int         // the extent's wkid, 0 when not given
 }
 
-// ParseQuantization reads quantizationParameters.
-func ParseQuantization(v any) (Quantization, bool) {
+// ParseQuantization reads quantizationParameters, rejecting what AGOL rejects.
+func ParseQuantization(v any) (Quantization, error) {
+	var q Quantization
 	m, ok := v.(map[string]any)
 	if !ok {
-		return Quantization{}, false
+		return q, Bad("", "'quantizationParameters' parameter is invalid")
 	}
-	q := Quantization{Scale: 1}
-	if t, ok := m["tolerance"]; ok && t != nil {
-		f, ok := t.(float64)
-		if !ok {
-			return q, false
+	switch mode := m["mode"].(type) {
+	case string:
+		if mode != "view" && mode != "edit" {
+			return q, Bad("", "'mode' parameter is invalid")
 		}
-		q.Scale = f
+		q.Edit = mode == "edit"
+	case float64:
+		q.Edit = mode == 1
 	}
-	if o, ok := m["originPosition"]; ok {
-		s, ok := o.(string)
-		if !ok {
-			return q, false
+	if o, ok := m["originPosition"].(string); ok {
+		if o != "upperLeft" && o != "lowerLeft" {
+			return q, Bad("", "'originPosition' parameter is invalid")
 		}
-		q.OriginPosition, q.HasOrigin = s, true
+		q.LowerLeft = o == "lowerLeft"
+	}
+	switch t := m["tolerance"].(type) {
+	case nil:
+	case float64:
+		q.Tolerance = t
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err != nil {
+			return q, Bad("", "'quantizationTolerance' parameter is invalid")
+		}
+		q.Tolerance = f
+	default:
+		return q, Bad("", "'quantizationTolerance' parameter is invalid")
 	}
 	if e, ok := m["extent"]; ok && e != nil {
-		em, ok := e.(map[string]any)
-		if !ok {
-			return q, false
-		}
-		for _, k := range []string{"xmin", "ymin", "xmax", "ymax"} {
-			if _, ok := em[k].(float64); !ok {
-				return q, false
+		em, _ := e.(map[string]any)
+		var b [4]float64
+		for i, k := range []string{"xmin", "ymin", "xmax", "ymax"} {
+			f, ok := em[k].(float64)
+			if !ok {
+				return q, Bad("Cannot perform query. Invalid query parameters.", "'quantizationExtent' parameter is invalid")
 			}
+			b[i] = f
 		}
-		q.XTranslate, q.YTranslate = em["xmin"].(float64), em["ymax"].(float64)
+		q.Extent = &b
+		q.ExtentSR, _ = geom.Wkid(em["spatialReference"])
 	}
-	return q, true
+	return q, nil
 }

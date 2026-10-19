@@ -220,3 +220,15 @@ func TestSpatialRelDirection(t *testing.T) {
 		t.Errorf("Within %v, want 0: a polygon is not within a point", w)
 	}
 }
+
+func TestRestInfoHasNoTokenService(t *testing.T) {
+	ts := fixture(t)
+	_, body := get(t, ts.URL+"/ugs/rest/info?f=json")
+	auth, _ := body["authInfo"].(map[string]any)
+	if auth["isTokenBasedSecurity"] != false || auth["tokenServicesUrl"] != nil {
+		t.Errorf("authInfo %v", auth)
+	}
+	if res, _ := http.Get(ts.URL + "/ugs/rest/generateToken"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("generateToken: %s", res.Status)
+	}
+}

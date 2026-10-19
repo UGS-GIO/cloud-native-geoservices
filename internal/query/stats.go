@@ -37,9 +37,12 @@ func (w *winnow) parseStatistics() error {
 		field, _ := m["onStatisticField"].(string)
 		name, _ := m["outStatisticFieldName"].(string)
 		if name == "" {
-			name = kind + "_" + field
+			name = strings.ToUpper(kind) + "_" + field
 		}
-		a := aggregate{kind: strings.ToUpper(kind), name: space.ReplaceAllString(name, "_")}
+		if space.MatchString(name) {
+			return Bad("", "'outStatistics' parameter is invalid")
+		}
+		a := aggregate{kind: strings.ToUpper(kind), name: name}
 		switch a.kind {
 		case "COUNT", "SUM", "MIN", "MAX", "AVG", "STDDEV", "VAR":
 		default:
@@ -128,7 +131,7 @@ type group struct {
 	accs   []accumulator
 }
 
-// statistics groups the features and computes outStatistics, as winnow's aggregate SQL did.
+// statistics groups the features and computes outStatistics.
 func (w *winnow) statistics(idx []int) (*Response, error) {
 	groupProps := make([]int, len(w.groupBy))
 	for i, g := range w.groupBy {
@@ -198,42 +201,21 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 	}
 	rows, exceeded := page(w, rows)
 
-	dateFields := map[string]bool{}
-	for _, a := range w.aggregates {
-		for _, f := range w.c.Meta.Fields {
-			if f.Name == a.field && f.Type == "Date" {
-				dateFields[a.name] = true
-			}
-		}
-	}
 	var fields []esri.Field
-	if len(rows) > 0 {
-		for _, kv := range rows[0] {
-			if slices.Contains(w.groupBy, kv.K) {
-				f, _ := esri.GroupField(w.c.Meta, kv.K)
-				fields = append(fields, f)
-				continue
-			}
-			fields = append(fields, esri.StatisticField(kv.K, isDateName(dateFields, kv.K)))
-		}
+	for _, a := range w.aggregates {
+		fields = append(fields, esri.StatisticField(a.name, a.kind, w.c.Meta, a.field))
+	}
+	for _, g := range w.groupBy {
+		f, _ := esri.GroupField(w.c.Meta, g)
+		fields = append(fields, f)
 	}
 	feats := make([]EsriFeature, len(rows))
-	jsonFeats := make([]any, len(rows))
 	for i, r := range rows {
 		feats[i] = EsriFeature{Attrs: r}
-		jsonFeats[i] = jsonx.Obj{{K: "attributes", V: r}}
 	}
-	fieldObjs := make([]any, len(fields))
-	for i, f := range fields {
-		fieldObjs[i] = f.Obj
-	}
-	out := jsonx.Obj{{K: "displayFieldName", V: ""}, {K: "fields", V: fieldObjs}, {K: "features", V: jsonFeats}}
-	fs := &FeatureSet{Fields: fields, Features: feats, NoGeometry: true}
-	if exceeded {
-		out.Set("exceededTransferLimit", true)
-		fs.Exceeded = True
-	}
-	return &Response{JSON: out, Features: fs}, nil
+	fs := &FeatureSet{IDField: w.c.Meta.IDField, GeometryType: esri.GeometryType(w.c.Meta.GeometryType), SR: w.outSR,
+		Fields: fields, Features: feats, NoGeometry: true, Exceeded: exceeded}
+	return &Response{JSON: fs, Features: fs}, nil
 }
 
 // getFold is a row's value for a key in any case.
@@ -249,13 +231,4 @@ func getFold(row jsonx.Obj, key string) any {
 // outputName reports a statistic's output name, which orderByFields may sort by.
 func (w *winnow) outputName(name string) bool {
 	return slices.ContainsFunc(w.aggregates, func(a aggregate) bool { return strings.EqualFold(a.name, name) })
-}
-
-func isDateName(dates map[string]bool, key string) bool {
-	for name := range dates {
-		if strings.HasSuffix(key, name) {
-			return true
-		}
-	}
-	return false
 }

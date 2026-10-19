@@ -140,7 +140,19 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 - `returnCountOnly`, `returnIdsOnly`, `returnExtentOnly`, `returnDistinctValues`.
 - `outStatistics` (`count`, `sum`, `min`, `max`, `avg`, `stddev`, `var`) with
   `groupByFieldsForStatistics`.
-- `f=json`, `f=geojson`, `f=pbf` (with `quantizationParameters`).
+- `f=json`, `f=geojson`, `f=pbf`. `quantizationParameters` apply to `f=json` and `f=pbf` as on
+  ArcGIS Online and are ignored by `f=geojson`: `view` mode steps by `tolerance` (default: the
+  extent over 10000) from the extent's corner (default: the layer extent), `edit` mode steps over
+  the spatial reference's XY domain, and a geometry that collapses to one point comes back empty
+  with its envelope center as `centroid`.
+
+Values are read as ArcGIS Online reads them: booleans and `f` in any case, and a boolean other
+than true or false, or a fractional or negative `resultRecordCount`, is a 400. A page of features
+is at most `MAX_RECORDS`, with or without geometry (`TILE_MAX_RECORDS` for `resultType=tile`),
+and `exceededTransferLimit` is written only when more features match than the page holds.
+
+The server has no token security: `/ugs/rest/info` reports `isTokenBasedSecurity: false`, as an
+ArcGIS Server without security does.
 
 Responses carry an ETag (data version + normalized query) and `Cache-Control`, so a CDN in front
 can serve repeated tiles.
@@ -155,17 +167,15 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
   references give a 400. As on ArcGIS Online, 4269 converts with WGS_1984_(ITRF00)_To_NAD_1983,
   and an `outSR` of 900913 is a 400.
 - `f=geojson` does not fully conform to RFC 7946 (for example, the multipoint geometry above).
-- Statistics are not typed by their source field. For example, `min` of an integer field is
-  reported as a double.
-- Layer metadata reports `supportsCoordinatesQuantization: false` and
-  `supportedQueryFormats: "JSON"`, though `f=pbf` and `quantizationParameters` work.
+- GeoParquet has no string lengths, so string fields report length 128.
+- Without `orderByFields`, a full page holds the first matches by object id; ArcGIS Online
+  picks them in its own index order.
 - `spatialRel` values other than the four above give a 400. There is no support for `having`,
   `returnZ`/`returnM`, attachments, related records or edits.
 - The service path prefix `/ugs/rest/services` is fixed.
 - `testdata/conformance/known_gaps.json` lists every other difference from ArcGIS Online that the
   conformance suite finds.
-- Some behavior follows Koop, which this service replaced: `exceededTransferLimit` is null when
-  the server did not page, and multipolygon rings are written hole first.
+- Each multipolygon member's rings are written hole first.
 
 ## Conformance
 

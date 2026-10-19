@@ -183,7 +183,7 @@ func layerMeta(ctx context.Context, c *client, u string) (*meta, error) {
 }
 
 // derived adds the vars the recorder works out: an offset near the end, an envelope in Web
-// Mercator, the point as JSON, and Map Viewer's quantization parameters for a tile.
+// Mercator and as JSON, the point as JSON, and Map Viewer's quantization parameters for a tile.
 func derived(ctx context.Context, c *client, l conformance.Layer, m *meta) (map[string]string, error) {
 	vars := map[string]string{}
 	for k, v := range l.Vars {
@@ -206,6 +206,7 @@ func derived(ctx context.Context, c *client, l conformance.Layer, m *meta) (map[
 		x0, y0 := mercator(b[0], b[1])
 		x1, y1 := mercator(b[2], b[3])
 		vars["env3857"] = fmt.Sprintf("%.4f,%.4f,%.4f,%.4f", x0, y0, x1, y1)
+		vars["envext"] = fmt.Sprintf(`{"xmin":%v,"ymin":%v,"xmax":%v,"ymax":%v,"spatialReference":{"wkid":4326}}`, b[0], b[1], b[2], b[3])
 	}
 	if pt, ok := l.Vars["pt"]; ok {
 		x, y, _ := strings.Cut(pt, ",")

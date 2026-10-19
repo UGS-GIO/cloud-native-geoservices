@@ -73,9 +73,6 @@ func (s *Server) Handler() http.Handler {
 		s.send(w, r, &encoded{body: jsonx.Marshal(jsonx.Obj{{K: "ok", V: true}}), contentType: jsonType}, "")
 	})
 	mux.HandleFunc("/ugs/rest/info", s.restInfo)
-	mux.HandleFunc("/ugs/rest/generateToken", func(w http.ResponseWriter, r *http.Request) {
-		s.send(w, r, &encoded{body: []byte("{}"), contentType: jsonType}, "")
-	})
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer", s.service)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer/{layer}", s.service)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer/{layer}/{op}", s.service)
@@ -138,10 +135,9 @@ func (s *Server) restInfo(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	// Koop always advertises an https token URL on the request's host.
-	s.send(w, r, encode(p, jsonx.Obj{{K: "currentVersion", V: 11.2}, {K: "fullVersion", V: "11.2.0"},
-		{K: "authInfo", V: jsonx.Obj{{K: "isTokenBasedSecurity", V: true},
-			{K: "tokenServicesUrl", V: "https://" + r.Host + "/ugs/rest/generateToken"}}}}), "")
+	// A public server: as on an ArcGIS Server without security, there is no token service.
+	s.send(w, r, encode(p, jsonx.Obj{{K: "currentVersion", V: 12}, {K: "fullVersion", V: "12.0.0"},
+		{K: "authInfo", V: jsonx.Obj{{K: "isTokenBasedSecurity", V: false}}}}), "")
 }
 
 func infoFormat(p query.Params) error {

@@ -155,7 +155,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	}
 	meta := &esri.Metadata{Name: name, Description: item.Description, IDField: "feature_id",
 		GeometryType: layer.GeometryType, Fields: layer.Columns, Extent: layer.Extent,
-		MaxRecordCount: int(pr.MaxRecords), Renderer: style["renderer"], LabelingInfo: style["labelingInfo"],
+		MaxRecordCount: int(pr.MaxRecords), TileMaxRecordCount: int(pr.TileMaxRecords), Renderer: style["renderer"], LabelingInfo: style["labelingInfo"],
 		MinScale: style["minScale"], MaxScale: style["maxScale"]}
 	c := &query.Collection{Meta: meta}
 	if !isQuery {
@@ -252,17 +252,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 			return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
 		})
 	}
-	// Mirrors JavaScript's `!tile && (over || (thin && read past))`, where thin is null without a page.
-	switch {
-	case tile:
-		c.Exceeded = query.False
-	case int64(len(feats)) > limit:
-		c.Exceeded = query.True
-	case p.Page == nil:
-		c.Exceeded = query.Null
-	case thin && int64(len(rows)) > readLimit:
-		c.Exceeded = query.True
-	}
+	c.Exceeded = !tile && (int64(len(feats)) > limit || thin && int64(len(rows)) > readLimit)
 	if int64(len(order)) > limit {
 		order = order[:limit]
 	}
@@ -303,7 +293,7 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 		return out, err
 	}
 	feats, err := next()
-	c.Features, c.Next, c.Exceeded = feats, next, query.Null
+	c.Features, c.Next = feats, next
 	return err
 }
 

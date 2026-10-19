@@ -1,5 +1,5 @@
-// Package js gives values JavaScript's number and string conversions, which Koop's responses
-// depend on: values are nil, bool, int64, float64 or string.
+// Package js gives values JavaScript's number and string conversions, which parameter parsing and
+// the PBF encoder use: values are nil, bool, int64, float64 or string.
 package js
 
 import (

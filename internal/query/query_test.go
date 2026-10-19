@@ -47,10 +47,10 @@ func TestRun(t *testing.T) {
 		{"where=acres+%2B+1+=+6&returnCountOnly=true", `{"count":1}`},
 		{"where=1=1&returnIdsOnly=true&orderByFields=acres DESC", `{"objectIdFieldName":"feature_id","objectIds":[1,3,2]}`},
 		{"outStatistics=" + url.QueryEscape(`[{"statisticType":"sum","onStatisticField":"acres","outStatisticFieldName":"s"}]`) + "&groupByFieldsForStatistics=kind",
-			`{"displayFieldName":"","fields":[{"name":"s","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"s","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"s":null,"kind":"Pond"}}]}`},
+			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","geometryType":"esriGeometryPolygon","spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"s","type":"esriFieldTypeDouble","alias":"s","sqlType":"sqlTypeFloat","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","length":128,"domain":null,"defaultValue":null}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"s":null,"kind":"Pond"}}]}`},
 		{"where=1=1&returnIdsOnly=true&orderByFields=flag,feature_id DESC", `{"objectIdFieldName":"feature_id","objectIds":[2,3,1]}`},
 		{"outStatistics=" + url.QueryEscape(`[{"statisticType":"min","onStatisticField":"flag","outStatisticFieldName":"lo"},{"statisticType":"max","onStatisticField":"flag","outStatisticFieldName":"hi"}]`),
-			`{"displayFieldName":"","fields":[{"name":"lo","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"lo","domain":null,"defaultValue":null},{"name":"hi","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"hi","domain":null,"defaultValue":null}],"features":[{"attributes":{"lo":0,"hi":1}}]}`},
+			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","geometryType":"esriGeometryPolygon","spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"lo","type":"esriFieldTypeInteger","alias":"lo","sqlType":"sqlTypeInteger","domain":null,"defaultValue":null},{"name":"hi","type":"esriFieldTypeInteger","alias":"hi","sqlType":"sqlTypeInteger","domain":null,"defaultValue":null}],"features":[{"attributes":{"lo":0,"hi":1}}]}`},
 		{"geometry=-111.5,40.1,-111.4,40.2&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[1]}`},
 		{"geometry=-112.5,39.5,-110.5,41.5&spatialRel=esriSpatialRelContains&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[1]}`},
 		{"geometry=-111.5,40.1,-111.4,40.2&spatialRel=esriSpatialRelContains&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[]}`},
@@ -60,13 +60,21 @@ func TestRun(t *testing.T) {
 		{"geometry=-111.9,40.8,-111.8,40.9&spatialRel=esriSpatialRelTouches", "error: 'spatialRel' parameter is invalid"},
 		{"resultRecordCount=abc", `error: "resultRecordCount" must be a number`},
 		{"f=xml", "error: Invalid format"},
+		{"f=geojson&where=1=1&returnCountOnly=true", `{"type":"FeatureCollection","properties":{"count":3},"features":[]}`},
+		{"f=geojson&objectIds=3&outFields=kind", `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":null,"properties":{"kind":"Lake"}}]}`},
+		{"where=1=1&outStatistics=" + url.QueryEscape(`[{"statisticType":"count","onStatisticField":"kind","outStatisticFieldName":"a b"}]`), "error: "},
+		{"where=1=1&resultRecordCount=2.5", "error: Cannot perform query. Invalid query parameters."},
+		{"where=1=1&resultOffset=-1", "error: Cannot perform query. Invalid query parameters."},
+		{"f=JSON&where=true&returnCountOnly=TRUE", `{"count":3}`},
+		{"where=1=1&returnIdsOnly=True", `{"objectIdFieldName":"feature_id","objectIds":[1,2,3]}`},
+		{"where=1=1&returnIdsOnly=1", "error: "},
 		{"returnCountOnly=true", "error: No where clause specified"},
 		{"where=%20&returnCountOnly=true", "error: No where clause specified"},
 		{"objectIds=1&returnCountOnly=true", `{"count":1}`},
 		{"where=1=1&outSR=2263", "error: Unsupported spatial reference: 2263"},
 		{"where=nope ===", `error: Invalid "where" parameter: nope ===`},
 		{"where=1=1&outFields=kind&returnDistinctValues=true&returnGeometry=false&resultRecordCount=1",
-			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","hasZ":false,"hasM":false,"spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"kind":"Lake"}}],"exceededTransferLimit":true,"geometryType":"esriGeometryPolygon"}`},
+			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","geometryType":"esriGeometryPolygon","spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","length":128,"domain":null,"defaultValue":null}],"exceededTransferLimit":true,"features":[{"attributes":{"kind":"Lake"}}]}`},
 	}
 	for _, tt := range tests {
 		if got := run(t, tt.q); got != tt.want {
@@ -96,10 +104,31 @@ func FuzzRun(f *testing.F) {
 	})
 }
 
-func TestGeometryPrecisionIsBounded(t *testing.T) {
-	for _, q := range []string{"geometryPrecision=100000000", "geometryPrecision=-1"} {
-		if got := run(t, q); !strings.HasPrefix(got, "error: ") {
-			t.Errorf("%s answered %.80s", q, got)
+func TestGeometryPrecision(t *testing.T) {
+	tests := []struct{ q, want string }{
+		{"objectIds=2&geometryPrecision=0", `{"x":-100,"y":30}`},
+		{"objectIds=2&geometryPrecision=-3", `{"x":-100,"y":30}`},
+		{"objectIds=1&geometryPrecision=100000000", `[-112,40]`},
+		{"objectIds=1&geometryPrecision=abc", "error: "},
+	}
+	for _, tt := range tests {
+		if got := run(t, tt.q); !strings.Contains(got, tt.want) {
+			t.Errorf("%s answered %.200s", tt.q, got)
+		}
+	}
+}
+
+func TestQuantization(t *testing.T) {
+	qp := "&quantizationParameters=" + url.QueryEscape(`{"originPosition":"upperLeft","tolerance":1,"extent":{"xmin":-101,"ymin":0,"xmax":0,"ymax":31}}`)
+	tests := []struct{ q, want string }{
+		{"objectIds=2" + qp, `"transform":{"originPosition":"upperLeft","scale":[1,1],"translate":[-101,31]}`},
+		{"objectIds=2" + qp, `{"x":1,"y":1}`},
+		{"objectIds=2&f=geojson" + qp, `"coordinates":[-100,30]`},
+		{"objectIds=2&returnGeometry=false" + qp, `"spatialReference":{"wkid":4326,"latestWkid":4326},"fields"`},
+	}
+	for _, tt := range tests {
+		if got := run(t, tt.q); !strings.Contains(got, tt.want) {
+			t.Errorf("%s answered %.300s", tt.q, got)
 		}
 	}
 }

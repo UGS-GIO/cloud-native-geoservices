@@ -29,9 +29,9 @@ func Meters(distance float64, units string) float64 {
 // metersPerDegree are the WGS84 meridian and parallel lengths of a degree at lat.
 func metersPerDegree(lat float64) (perLat, perLon float64) {
 	const a, e2 = 6378137.0, 6.69437999014e-3
-	s := math.Sin(lat * d2r)
+	s := math.Sin(lat * math.Pi / 180)
 	w := math.Sqrt(1 - e2*s*s)
-	return a * (1 - e2) / (w * w * w) * d2r, a / w * math.Cos(lat*d2r) * d2r
+	return a * (1 - e2) / (w * w * w) * math.Pi / 180, a / w * math.Cos(lat*math.Pi/180) * math.Pi / 180
 }
 
 // Pad grows a lon/lat box by meters on every side, by the shortest degree of longitude it spans.

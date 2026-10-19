@@ -1,6 +1,7 @@
 package query
 
 import (
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,6 +23,8 @@ type Response struct {
 	Count    *int64
 	IDs      *IDs
 	Features *FeatureSet
+	Extent   jsonx.Obj // a returnExtentOnly envelope
+	geoJSON  bool      // JSON is already the f=geojson answer
 }
 
 // IDs is a returnIdsOnly result.
@@ -79,22 +82,28 @@ func OutputSR(wkid int) SpatialRef { return outputSRs[wkid] }
 // selectAll is a where that is only 1=1, which needs no evaluating.
 var selectAll = regexp.MustCompile(`^\s*1\s*=\s*1\s*$`)
 
-// Run answers a query over the provider's collection, as Koop's queryJson did.
+// Run answers a query over the provider's collection.
 func Run(c *Collection, p Params) (*Response, error) {
-	f := p.Format()
+	res, err := answer(c, p)
+	if err != nil || p.Format() != "geojson" || res.geoJSON {
+		return res, err
+	}
+	res.JSON = res.featureCollection(p)
+	return res, nil
+}
+
+func answer(c *Collection, p Params) (*Response, error) {
 	// Counts and extents the provider worked out from the file metadata.
-	if c.Count != nil && p.True("returnCountOnly") {
-		o := jsonx.Obj{{K: "count", V: *c.Count}}
-		if p.True("returnExtentOnly") {
-			o.Set("extent", c.Extent)
+	if c.Count != nil && p.True("returnCountOnly") && !p.True("returnExtentOnly") {
+		return &Response{JSON: jsonx.Obj{{K: "count", V: *c.Count}}, Count: c.Count}, nil
+	}
+	if c.Extent != nil && p.True("returnExtentOnly") {
+		var n *int64
+		if p.True("returnCountOnly") {
+			n = c.Count
 		}
-		return &Response{JSON: o, Count: c.Count}, nil
-	}
-	if c.Extent != nil && p.True("returnExtentOnly") && !p.True("returnCountOnly") {
-		return &Response{JSON: jsonx.Obj{{K: "extent", V: c.Extent}}}, nil
-	}
-	if f == "pbf" && p.True("returnExtentOnly") {
-		return nil, Bad("Bad Request")
+		sr, _ := c.Extent.Get("spatialReference")
+		return extentResult(c.Meta, sr.(SpatialRef), c.Extent, n), nil
 	}
 
 	w, err := newWinnow(c, p)
@@ -123,26 +132,34 @@ func Run(c *Collection, p Params) (*Response, error) {
 	if stats := w.aggregates; stats != nil {
 		return w.statistics(idx)
 	}
-	if f == "geojson" {
-		return &Response{JSON: jsonx.Obj{{K: "type", V: "FeatureCollection"}, {K: "features", V: w.geojson(idx)}}}, nil
+	if p.Format() == "geojson" && !p.True("returnCountOnly") && !p.True("returnExtentOnly") && !p.True("returnIdsOnly") {
+		feats, exceeded := w.geojson(idx)
+		o := jsonx.Obj{{K: "type", V: "FeatureCollection"}}
+		if _, ok := p["outSR"]; ok {
+			o = append(o, jsonx.KV{K: "crs", V: crs(w.outSR)})
+		}
+		if exceeded || c.Exceeded {
+			o = append(o, jsonx.KV{K: "properties", V: jsonx.Obj{{K: "exceededTransferLimit", V: true}}})
+		}
+		return &Response{JSON: append(o, jsonx.KV{K: "features", V: feats}), geoJSON: true}, nil
 	}
 	feats, exceeded := w.esriFeatures(idx)
-	if p.True("returnCountOnly") || p.True("returnExtentOnly") {
-		n := int64(len(feats))
-		o := jsonx.Obj{}
+	if p.True("returnExtentOnly") {
+		var n *int64
 		if p.True("returnCountOnly") {
-			o.Set("count", n)
+			n = new(int64(len(feats)))
 		}
-		if p.True("returnExtentOnly") {
-			o.Set("extent", w.extentOf(idx))
-		}
-		return &Response{JSON: o, Count: &n}, nil
+		return extentResult(c.Meta, w.outSR, w.extentOf(idx), n), nil
+	}
+	if p.True("returnCountOnly") {
+		n := int64(len(feats))
+		return &Response{JSON: jsonx.Obj{{K: "count", V: n}}, Count: &n}, nil
 	}
 	if p.True("returnIdsOnly") {
 		ids := &IDs{IDField: c.Meta.IDField, Exceeded: exceeded}
 		ids.IDs = make([]any, len(feats))
 		for i, ft := range feats {
-			ids.IDs[i] = jsonx.Undefined
+			ids.IDs[i] = nil
 			for _, kv := range ft.Attrs {
 				if kv.K == c.Meta.IDField {
 					ids.IDs[i] = kv.V
@@ -160,10 +177,82 @@ func Run(c *Collection, p Params) (*Response, error) {
 		Features:     feats,
 		Exceeded:     c.Exceeded,
 	}
-	if exceeded {
-		fs.Exceeded = True
+	fs.Exceeded = fs.Exceeded || exceeded
+	if v, ok := p["quantizationParameters"]; ok && w.geometry {
+		if q, err := ParseQuantization(v); err == nil {
+			fs.Transform = q.Transform(w.outSR, c.Meta.Extent)
+		}
 	}
 	return &Response{JSON: fs, Features: fs}, nil
+}
+
+// extentResult is an extent (null when nil), with a count when n is set. As f=pbf, AGOL sends it as a polygon
+// feature result whose one feature is the extent's ring, with the count as an attribute.
+func extentResult(m *esri.Metadata, sr SpatialRef, ext jsonx.Obj, n *int64) *Response {
+	fs := &FeatureSet{IDField: m.IDField, GeometryType: "esriGeometryPolygon", SR: sr, Features: []EsriFeature{{}}}
+	o := jsonx.Obj{}
+	if n != nil {
+		o = append(o, jsonx.KV{K: "count", V: *n})
+		fs.Fields = []esri.Field{{Name: "count", Type: "esriFieldTypeInteger"}}
+		fs.Features[0].Attrs = []jsonx.KV{{K: "count", V: *n}}
+	}
+	if b, ok := box(ext); ok {
+		ring := []orb.Point{{b[0], b[1]}, {b[0], b[3]}, {b[2], b[3]}, {b[2], b[1]}, {b[0], b[1]}}
+		fs.Features[0].Geom = &geom.Esri{Kind: geom.EsriPolygon, Parts: [][]orb.Point{ring}}
+	}
+	var v any
+	if ext != nil {
+		v = ext
+	}
+	return &Response{JSON: append(o, jsonx.KV{K: "extent", V: v}), Count: n, Extent: ext, Features: fs}
+}
+
+// box is an envelope's corners, false when it is empty.
+func box(ext jsonx.Obj) ([4]float64, bool) {
+	var b [4]float64
+	if ext == nil {
+		return b, false
+	}
+	for i, k := range []string{"xmin", "ymin", "xmax", "ymax"} {
+		v, _ := ext.Get(k)
+		b[i], _ = v.(float64)
+	}
+	ok := b[0] <= b[2] && b[1] <= b[3] && !math.IsInf(b[0], 0) && !math.IsInf(b[2], 0)
+	return b, ok
+}
+
+// crs names a GeoJSON answer's spatial reference, as AGOL does.
+func crs(sr SpatialRef) jsonx.Obj {
+	return jsonx.Obj{{K: "type", V: "name"}, {K: "properties", V: jsonx.Obj{{K: "name", V: "EPSG:" + strconv.Itoa(sr.Latest)}}}}
+}
+
+// featureCollection is the f=geojson form of a count, ids, extent or statistics answer.
+func (res *Response) featureCollection(p Params) jsonx.Obj {
+	o := jsonx.Obj{{K: "type", V: "FeatureCollection"}}
+	id, _ := geom.Wkid(p["outSR"])
+	if _, ok := p["outSR"]; ok || res.Extent != nil {
+		o = append(o, jsonx.KV{K: "crs", V: crs(OutputSR(id))})
+	}
+	if b, ok := box(res.Extent); ok {
+		o = append(o, jsonx.KV{K: "bbox", V: b[:]})
+	}
+	props := jsonx.Obj{}
+	if res.Count != nil {
+		props = append(props, jsonx.KV{K: "count", V: *res.Count})
+	}
+	if res.IDs != nil {
+		props = append(props, jsonx.KV{K: "objectIdFieldName", V: res.IDs.IDField}, jsonx.KV{K: "objectIds", V: res.IDs.IDs})
+	}
+	if len(props) > 0 {
+		o = append(o, jsonx.KV{K: "properties", V: props})
+	}
+	feats := []any{}
+	if res.Features != nil && res.Extent == nil {
+		for _, f := range res.Features.Features {
+			feats = append(feats, jsonx.Obj{{K: "type", V: "Feature"}, {K: "geometry", V: nil}, {K: "properties", V: jsonx.Obj(f.Attrs)}})
+		}
+	}
+	return append(o, jsonx.KV{K: "features", V: feats})
 }
 
 // winnow is one query's normalized options over a collection.
@@ -279,6 +368,15 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if n, ok := p.Number("resultRecordCount"); ok && !applied["resultRecordCount"] && !applied["limit"] && isInt(n) && n != 0 {
 		w.limit = int(n) + 1
 	}
+	// As on AGOL, a page of features is at most maxRecordCount, with or without geometry.
+	features := !p.True("returnCountOnly") && !p.True("returnIdsOnly") && !p.True("returnExtentOnly") && w.aggregates == nil
+	maxRecords := c.Meta.MaxRecordCount
+	if s, _ := p.String("resultType"); s == "tile" {
+		maxRecords = c.Meta.TileMaxRecordCount
+	}
+	if features && maxRecords > 0 && !applied["limit"] && (w.limit == 0 || w.limit > maxRecords+1) {
+		w.limit = maxRecords + 1
+	}
 	if n, ok := p.Number("resultOffset"); ok && w.limit != 0 && !applied["offset"] && n > 0 {
 		w.offset = int(n)
 	}
@@ -293,12 +391,9 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if b, ok := p["returnGeometry"].(bool); ok && !b {
 		w.geometry = false
 	}
-	if n, ok := p.Number("geometryPrecision"); ok && n != 0 {
-		// Koop's Number.prototype.toFixed throws outside 0..100; past it, formatting is unbounded work.
-		if n < 0 || n > 100 {
-			return nil, Bad("geometryPrecision must be between 0 and 100")
-		}
-		v := int(n)
+	// AGOL rounds a negative precision as 0, and past 20 digits keeps full precision.
+	if n, ok := p.Number("geometryPrecision"); ok && n <= 20 {
+		v := max(int(n), 0)
 		w.precision = &v
 	}
 	return w, nil
@@ -412,7 +507,7 @@ func (w *winnow) outPoint(p orb.Point) orb.Point {
 }
 
 func toFixed(f float64, d int) float64 {
-	v, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'f', max(d, 0), 64), 64)
+	v, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'f', d, 64), 64)
 	return v
 }
 
@@ -479,37 +574,35 @@ func distinct[T any](xs []T, appendJSON func(T, []byte) []byte) []T {
 	})
 }
 
-// geojson is the f=geojson feature list.
-func (w *winnow) geojson(idx []int) []any {
+// geojson is the f=geojson feature list: each feature has an id when the id field is output, and
+// a null geometry when returnGeometry is false.
+func (w *winnow) geojson(idx []int) ([]any, bool) {
 	idx = w.sorted(idx)
+	withID := w.idIndex >= 0 && (w.fields == nil || slices.Contains(w.fields, w.idIndex))
 	out := make([]any, 0, len(idx))
 	for _, i := range idx {
 		ft := &w.c.Features[i]
-		props := jsonx.Obj(w.attrs(ft))
-		o := jsonx.Obj{}
-		if w.fields == nil {
-			o = append(o, jsonx.KV{K: "type", V: "Feature"})
+		o := jsonx.Obj{{K: "type", V: "Feature"}}
+		if withID {
+			o = append(o, jsonx.KV{K: "id", V: ft.Props[w.idIndex]})
 		}
-		o = append(o, jsonx.KV{K: "properties", V: props})
+		var g any
 		if w.geometry {
-			if g := w.outGeometry(ft.Geom); g != nil {
-				o = append(o, jsonx.KV{K: "geometry", V: geom.GeoJSON{G: g}})
-			} else {
-				o = append(o, jsonx.KV{K: "geometry", V: nil})
+			if og := w.outGeometry(ft.Geom); og != nil {
+				g = geom.GeoJSON{G: og}
 			}
 		}
-		out = append(out, o)
+		out = append(out, append(o, jsonx.KV{K: "geometry", V: g}, jsonx.KV{K: "properties", V: jsonx.Obj(w.attrs(ft))}))
 	}
 	if w.distinct {
 		out = distinct(out, func(o any, b []byte) []byte { return jsonx.Append(b, o) })
 	}
-	out, _ = page(w, out)
-	return out
+	return page(w, out)
 }
 
 // extentOf covers the selected features: from the bbox covering columns when the provider read
 // them, else from their geometry. It is null when nothing has a geometry.
-func (w *winnow) extentOf(idx []int) any {
+func (w *winnow) extentOf(idx []int) jsonx.Obj {
 	b := geom.Bounds(nil)
 	cols := make([]int, len(pq.BBox))
 	for k, name := range pq.BBox {

@@ -61,6 +61,8 @@ func encodeQuery(p query.Params, res *query.Response) (*encoded, error) {
 	}
 	var body []byte
 	switch {
+	case p.True("returnExtentOnly") && res.Features != nil:
+		body = pbf.Features(res.Features)
 	case p.True("returnCountOnly"):
 		var n int64
 		if res.Count != nil {
@@ -70,13 +72,7 @@ func encodeQuery(p query.Params, res *query.Response) (*encoded, error) {
 	case p.True("returnIdsOnly") && res.IDs != nil:
 		body = pbf.IDs(res.IDs)
 	case res.Features != nil:
-		var q *query.Quantization
-		if v, ok := p["quantizationParameters"]; ok {
-			if qq, ok := query.ParseQuantization(v); ok {
-				q = &qq
-			}
-		}
-		body = pbf.Features(res.Features, pbf.TransformFor(q, res.Features.SR.Wkid))
+		body = pbf.Features(res.Features)
 	default:
 		return nil, query.Bad("Bad Request")
 	}

@@ -35,14 +35,6 @@ func fields(t *testing.T, b []byte) map[protowire.Number][][]byte {
 	return out
 }
 
-func TestRound(t *testing.T) {
-	for in, want := range map[float64]int64{2.5: 3, -2.5: -2, -2.6: -3, 0.49999999999999994: 0, 1.5: 2} {
-		if got := round(in); got != want {
-			t.Errorf("round(%v) = %d, want %d", in, got, want)
-		}
-	}
-}
-
 func TestCount(t *testing.T) {
 	q := fields(t, Count(19743))[2][0]
 	c := fields(t, fields(t, q)[2][0])
@@ -60,11 +52,11 @@ func TestFeatures(t *testing.T) {
 			// The second point quantizes onto the first and is dropped; y counts down from the top.
 			Geom: &geom.Esri{Kind: geom.EsriPolyline, Parts: [][]orb.Point{{{0, 100}, {0.4, 100}, {10, 80}}, {{5, 5}, {5.2, 5}}}},
 		}},
-		Exceeded: query.Null,
+		Transform: &geom.Transform{XScale: 1, YScale: 1, YTranslate: 100},
 	}
-	result := fields(t, fields(t, fields(t, Features(fs, Transform{1, 1, 0, 100}))[2][0])[1][0])
+	result := fields(t, fields(t, fields(t, Features(fs))[2][0])[1][0])
 	if _, ok := result[9]; ok {
-		t.Error("a null exceededTransferLimit is not written")
+		t.Error("exceededTransferLimit is written only when true")
 	}
 	if names := result[13]; string(fields(t, names[0])[1][0]) != "feature_id" {
 		t.Error("fields are sorted by name")

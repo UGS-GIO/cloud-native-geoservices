@@ -19,7 +19,6 @@
    "*/layer: editingInfo (missing)",
    "*/layer: hasMetadata (missing)",
    "*/layer: cacheMaxAge (missing)",
-   "*/layer: currentVersion (value)",
    "*/layer: indexes (length)",
    "*/layer: templates (length)",
    "*/layer: htmlPopupType (value)",
@@ -67,15 +66,8 @@
    "*/layer: enableNullGeometry (missing)",
    "*/layer: maxIdsCount (missing)",
    "*/layer: fields[*].editable (value)",
-   "*/layer: fields[*].precision (missing)",
-   "*/layer: dateFieldsTimeReference.timeZoneIANA (missing)"],
+   "*/layer: fields[*].precision (missing)"],
    "reason": "Capabilities this server does not implement (editing, curves, attachments, analytics, export, sync, collation). It reports them as unsupported or leaves them out."},
-  {"match": [
-   "*/layer: hasLabels (extra)",
-   "*/layer: ownershipBasedAccessControlForFeatures (extra)",
-   "*/layer: supportedPbfFeatureEncodings (extra)",
-   "*/layer: timeInfo (extra)"],
-   "reason": "Koop's layer defaults; harmless."},
   {"match": [
    "*/layer: extent (value)",
    "*/layer: extent.*min (value)",
@@ -84,31 +76,8 @@
  ],
  "known": [
   {"match": [
-   "*/stats*: fields[*].type (value)",
-   "*/stats*: fields[*].length (missing)"],
-   "reason": "Statistics fields are not typed by their source: count is a double (Esri: integer), min and max of an integer field are doubles, and string and date results have no length."},
-  {"match": [
-   "*/stats-default-name: features[].attributes.* (*)",
-   "*/stats-default-name: fields[*] (*)"],
-   "reason": "The default outStatisticFieldName is count_feature_id; Esri's is COUNT_OBJECTID."},
-  {"match": [
-   "*/stats*: displayFieldName (extra)",
-   "*/stats*: geometryType (missing)",
-   "*/stats*: objectIdFieldName (missing)",
-   "*/stats*: spatialReference (missing)",
-   "*/stats*: uniqueIdField (missing)"],
-   "reason": "Statistics answers carry Koop's displayFieldName and leave out objectIdFieldName, uniqueIdField, geometryType and spatialReference."},
-  {"match": [
    "*/distinct-count: count (value)"],
    "reason": "returnCountOnly with returnDistinctValues counts rows, not distinct values."},
-  {"match": [
-   "*/geojson: features[].id (missing)",
-   "*/geojson-subset: features[].type (missing)",
-   "*/geojson-count: count (extra)",
-   "*/geojson-count: features (missing)",
-   "*/geojson-count: properties (missing)",
-   "*/geojson-count: type (missing)"],
-   "reason": "f=geojson: features have no id, have no type when outFields is not *, and a count is {\"count\": n} where Esri writes a FeatureCollection with properties.count."},
   {"match": [
    "*/features-utm: error (extra)",
    "*/features-utm: * (missing)"],
@@ -121,9 +90,8 @@
    "*/pbf: fields (order)"],
    "reason": "f=pbf lists fields in alphabetical order, not schema order."},
   {"match": [
-   "*: *spatialReference.latestWkid (missing)",
-   "*/layer: spatialReference (missing)"],
-   "reason": "f=pbf leaves out latestWkid, and the layer has no spatialReference."},
+   "*: *spatialReference.latestWkid (missing)"],
+   "reason": "f=pbf leaves out latestWkid."},
   {"match": [
    "*: fields[GlobalID].type (value)",
    "*: globalIdFieldName (*)",
@@ -132,19 +100,11 @@
   {"match": [
    "*: fields[*].length (value)",
    "*/layer: fields[*].nullable (value)"],
-   "reason": "String fields have length 128 and date fields 36, and every field is nullable false. Esri gives the real lengths (dates 8) and nullable true."},
+   "reason": "GeoParquet has no string lengths, so strings say 128; a GlobalID is a nullable string here."},
   {"match": [
-   "*/layer: supportsCoordinatesQuantization (value)",
-   "*/layer: supportedQueryFormats (value)"],
-   "reason": "The layer says supportsCoordinatesQuantization false and supportedQueryFormats \"JSON,geojson,PBF\", though quantization works."},
-  {"match": [
-   "*/layer: tileMaxRecordCount (value)",
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],
-   "reason": "The layer reports 2000 for every page size; tileMaxRecordCount is not TILE_MAX_RECORDS."},
-  {"match": [
-   "*/layer: displayField (value)"],
-   "reason": "displayField is the id field; Esri names a text field."},
+   "reason": "resultType=standard is not supported, so both standard page sizes are maxRecordCount."},
   {"match": [
    "*/layer: supportedSpatialRelationships (length)"],
    "reason": "Only four spatialRel values are supported (README)."}
