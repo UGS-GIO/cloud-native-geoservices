@@ -125,11 +125,13 @@ func main() {
 	}
 	cat := catalog.New(src, time.Duration(ttl)*time.Second)
 	cat.HTTP.Transport = remote.Transport
+	// Shapes get the largest share: a shape miss costs a decode and a simplify, a decoded miss
+	// only a decode. Caches and geometry budget total 47%, well under the 80% heap limit.
 	prov := &provider.Provider{
 		Catalog: cat,
 		Reader: pq.NewReader(budget("PAGE_CACHE_MB", 128, 0.03, limit),
-			budget("DECODED_CACHE_MB", 512, 0.125, limit), geometryBudget),
-		Shapes:          geom.NewShapes(budget("SHAPE_CACHE_MB", 256, 0.0625, limit)),
+			budget("DECODED_CACHE_MB", 512, 0.10, limit), geometryBudget),
+		Shapes:          geom.NewShapes(budget("SHAPE_CACHE_MB", 512, 0.15, limit)),
 		MaxRecords:      envInt("MAX_RECORDS", 2000),
 		TileMaxRecords:  envInt("TILE_MAX_RECORDS", 8000),
 		MaxGeometryRows: envInt("MAX_GEOMETRY_ROWS", 50000),

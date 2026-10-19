@@ -33,8 +33,8 @@ container memory limit. See [Memory sizing](performance.md#memory-sizing).
 | Variable | Default | Holds |
 |---|---|---|
 | `PAGE_CACHE_MB` | 128, or 3% of memory | Bytes fetched from data files |
-| `DECODED_CACHE_MB` | 512, or 12.5% | Decoded column values, by file, column and row group or page |
-| `SHAPE_CACHE_MB` | 256, or 6.25% | Simplified geometry, by file and zoom step |
+| `DECODED_CACHE_MB` | 512, or 10% | Decoded column values, by file, column and row group or page |
+| `SHAPE_CACHE_MB` | 512, or 15% | Simplified geometry, by file and zoom step |
 | `RESPONSE_CACHE_MB` | 256, or 6.25% | Encoded responses, kept compressed, by ETag |
 
 ## Request limits
