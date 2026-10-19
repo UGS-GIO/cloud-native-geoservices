@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-var fields = []string{"acres", "wetland_type", "name", "count", "flag", "date", "timestamp"}
+var fields = [][2]string{{"acres", "Double"}, {"wetland_type", "String"}, {"name", "String"},
+	{"count", "Integer"}, {"flag", "Integer"}, {"date", "String"}, {"timestamp", "Date"}}
 
-func resolve(name string) (int, bool) {
+func resolve(name string) (int, string, bool) {
 	for i, f := range fields {
-		if strings.EqualFold(f, name) {
-			return i, true
+		if strings.EqualFold(f[0], name) {
+			return i, f[1], true
 		}
 	}
-	return 0, false
+	return 0, "", false
 }
 
 func row(vals ...any) Row { return func(i int) any { return vals[i] } }
@@ -52,8 +53,18 @@ func TestMatch(t *testing.T) {
 		{"wetland_type IN ('Lake', NULL)", lake, true},
 		{"UPPER(wetland_type) = 'LAKE'", lake, true},
 		{"lower(name) LIKE '%utah%'", lake, true},
-		{"count = '3'", lake, false},  // = is strict
-		{"count <> '3'", lake, false}, // <> is loose
+		{"count = '3'", lake, true}, // a literal converts to the field's type
+		{"count <> ' 3 '", lake, false},
+		{"count IN ('3', 4)", lake, true},
+		{"acres > '12.25'", lake, true},
+		{"name = 5", lake, false},
+		{"name <> 5", lake, true},
+		{"1 = '1'", lake, true},
+		{"TRUE", lake, true},
+		{"count LIKE '3%'", lake, true},
+		{"date > 1900 AND date IN (1961, '1962')", row(nil, nil, nil, nil, nil, " 1961", nil), true}, // the string converts
+		{"name = 'x' AND name > 5", lake, false},
+		{"timestamp > '2020-01-01'", row(nil, nil, nil, nil, nil, nil, int64(1600000000000)), true},
 		{"name = 'O''Brien'", row(nil, nil, "O'Brien", nil, nil), true},
 		{"acres > -1", lake, true},
 		{`"wetland_type" = 'Lake'`, lake, true},
@@ -68,18 +79,32 @@ func TestMatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tt.where, err)
 		}
-		if got := Match(e, tt.r); got != tt.want {
+		if got := e.Match(tt.r); got != tt.want || e.Err() != nil {
 			t.Errorf("%s = %v, want %v", tt.where, got, tt.want)
 		}
 	}
 }
 
 func TestParseErrors(t *testing.T) {
-	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE", "missing = 1", "missing IS NULL"} {
+	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE", "missing = 1", "missing IS NULL",
+		"timestamp = 0", "timestamp > 'x'", "count = '3.5'", "count = TRUE", "count",
+		"NOT name", "1", "acres > 1 AND name"} {
 		if _, err := Parse(w, resolve); err == nil {
 			t.Errorf("%q parsed", w)
 		} else if !strings.Contains(err.Error(), `Invalid "where" parameter`) {
 			t.Errorf("%q: %v", w, err)
+		}
+	}
+}
+
+func TestConversionError(t *testing.T) {
+	for _, w := range []string{"name > 5", "name IN (5)", "acres > 1 AND name BETWEEN 1 AND 2"} {
+		e, err := Parse(w, resolve)
+		if err != nil {
+			t.Fatalf("%s: %v", w, err)
+		}
+		if e.Match(row(12.5, "Lake", "Utah Lake", int64(3), true)) || e.Err() == nil {
+			t.Errorf("%s: no error converting a name", w)
 		}
 	}
 }
@@ -94,7 +119,7 @@ func FuzzParse(f *testing.F) {
 		if err != nil {
 			return
 		}
-		Match(e, row(1.5, "a", "b", int64(2), true, "1961", int64(0)))
-		Match(e, row(nil, nil, nil, nil, nil, nil, nil))
+		e.Match(row(1.5, "a", "b", int64(2), true, "1961", int64(0)))
+		e.Match(row(nil, nil, nil, nil, nil, nil, nil))
 	})
 }

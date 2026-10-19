@@ -86,7 +86,10 @@ func Run(c *Collection, p Params) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx := w.filter()
+	idx, err := w.filter()
+	if err != nil {
+		return nil, err
+	}
 	if c.Next != nil {
 		// An unpaged count needs no rows kept, only tallied.
 		tally := p.True("returnCountOnly") && !p.True("returnExtentOnly") && w.limit == 0
@@ -149,7 +152,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 type winnow struct {
 	c          *Collection
 	p          Params
-	where      where.Expr
+	where      *where.Clause
 	ids        []any
 	idIndex    int
 	spatial    *Spatial
@@ -287,22 +290,22 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	return w, nil
 }
 
-func (w *winnow) resolve(name string) (int, bool) {
-	for i, prop := range w.c.Props {
-		if strings.EqualFold(prop, name) {
-			return i, true
+func (w *winnow) resolve(name string) (int, string, bool) {
+	for _, f := range w.c.Meta.Fields {
+		if i := w.c.propIndex(f.Name); i >= 0 && strings.EqualFold(f.Name, name) {
+			return i, f.Type, true
 		}
 	}
-	return 0, false
+	return 0, "", false
 }
 
 // filter returns the indexes of the features that pass where, objectIds and the geometry
 // filter, ordered and paged (after grouping, statistics apply their own ordering).
-func (w *winnow) filter() []int {
+func (w *winnow) filter() ([]int, error) {
 	var idx []int
 	for i := range w.c.Features {
 		ft := &w.c.Features[i]
-		if w.where != nil && !where.Match(w.where, func(f int) any { return ft.Props[f] }) {
+		if w.where != nil && !w.where.Match(func(f int) any { return ft.Props[f] }) {
 			continue
 		}
 		if w.ids != nil && !w.idMatch(ft) {
@@ -313,7 +316,10 @@ func (w *winnow) filter() []int {
 		}
 		idx = append(idx, i)
 	}
-	return idx
+	if w.where != nil && w.where.Err() != nil {
+		return nil, Bad(w.where.Err().Error())
+	}
+	return idx, nil
 }
 
 // drain filters the provider's further chunks too, keeping what passes without its geometry (an
@@ -345,7 +351,9 @@ func (w *winnow) drain(idx []int, tally bool) ([]int, int64, error) {
 			return idx, n, nil
 		}
 		w.c.Features = chunk
-		idx = w.filter()
+		if idx, err = w.filter(); err != nil {
+			return nil, 0, err
+		}
 	}
 }
 
