@@ -210,8 +210,12 @@ func (l *Layer) segments(ctx context.Context, g int) ([]segment, error) {
 			return nil, err
 		}
 		lay, err := l.layout(ctx, lf, g)
-		if err != nil || len(lay.pages) != len(ci.NullPages) {
+		if err != nil {
 			return nil, err
+		}
+		if n := len(lay.pages); len(ci.NullPages) != n || len(ci.MinValues) != n ||
+			len(ci.MaxValues) != n || len(ci.NullCounts) != 0 && len(ci.NullCounts) != n {
+			return nil, nil
 		}
 		t := l.chunkMeta(lf, g).MetaData.Type
 		var out []segment
