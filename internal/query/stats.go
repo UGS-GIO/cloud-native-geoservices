@@ -63,67 +63,63 @@ func (w *winnow) parseStatistics() error {
 	return nil
 }
 
+// accumulator computes the statistics of one field's non-null values, as SQL aggregates do:
+// stddev and var are the sample ones, and every statistic but count is null without values.
 type accumulator struct {
 	count      int64
 	nums       int64
 	sum, sumSq float64
-	min, max   float64
-	n          int64 // values seen, nulls included (stddev counts them as 0, like alasql)
+	min, max   any // numbers, or strings ignoring case
 }
 
 func (a *accumulator) add(v any) {
-	x, isNum := js.AsNumber(v)
-	a.n++
-	if v != nil {
-		a.count++
+	if v == nil {
+		return
 	}
-	if isNum {
+	if a.count == 0 || compareKeys(v, a.min, false) < 0 {
+		a.min = v
+	}
+	if a.count == 0 || compareKeys(v, a.max, false) > 0 {
+		a.max = v
+	}
+	a.count++
+	if x, ok := js.AsNumber(v); ok {
 		a.sum += x
-		if a.nums == 0 || x < a.min {
-			a.min = x
-		}
-		if a.nums == 0 || x > a.max {
-			a.max = x
-		}
 		a.sumSq += x * x
 		a.nums++
 	}
 }
 
 func (a *accumulator) result(kind string) any {
-	switch kind {
-	case "COUNT":
+	n := float64(a.nums)
+	switch {
+	case kind == "COUNT":
 		return a.count
-	case "SUM", "MIN", "MAX":
-		if a.nums == 0 {
-			return jsonx.Undefined
-		}
-		switch kind {
-		case "SUM":
-			return a.sum
-		case "MIN":
-			return a.min
-		}
-		return a.max
-	case "AVG":
-		if a.count == 0 {
-			return jsonx.Undefined
-		}
-		return a.sum / float64(a.count)
-	case "VAR":
-		if a.nums > 1 {
-			// Round-off can leave a constant column a hair below zero.
-			return max(0, (a.sumSq-a.sum*a.sum/float64(a.nums))/float64(a.nums-1))
-		}
-		return 0.0
-	case "STDDEV":
-		if a.n == 0 {
-			return 0.0
-		}
-		mean := a.sum / float64(a.n)
-		return math.Sqrt(max(0, a.sumSq/float64(a.n)-mean*mean))
+	case kind == "MIN":
+		return number(a.min)
+	case kind == "MAX":
+		return number(a.max)
+	case a.nums == 0 || a.nums == 1 && (kind == "VAR" || kind == "STDDEV"):
+		return nil
+	case kind == "SUM":
+		return a.sum
+	case kind == "AVG":
+		return a.sum / n
 	}
-	return jsonx.Undefined
+	// Round-off can leave a constant column a hair below zero.
+	v := max(0, (a.sumSq-a.sum*a.sum/n)/(n-1))
+	if kind == "STDDEV" {
+		return math.Sqrt(v)
+	}
+	return v
+}
+
+// number is an integer as a float64, as statistics are written.
+func number(v any) any {
+	if x, ok := v.(int64); ok {
+		return float64(x)
+	}
+	return v
 }
 
 type group struct {
@@ -139,21 +135,21 @@ func (w *winnow) statistics(idx []int) (*Response, error) {
 	}
 	var groups []*group
 	byKey := map[string]*group{}
+	var key []byte
 	for _, i := range idx {
 		ft := &w.c.Features[i]
 		values := make([]any, len(groupProps))
-		var key strings.Builder
+		key = key[:0]
 		for j, p := range groupProps {
 			if p >= 0 {
 				values[j] = ft.Props[p]
 			}
-			key.WriteString(js.String(values[j])) // alasql joins the String() of each value
-			key.WriteByte('`')
+			key = jsonx.Append(key, values[j]) // JSON keeps null apart from "null"
 		}
-		g, ok := byKey[key.String()]
+		g, ok := byKey[string(key)]
 		if !ok {
 			g = &group{values: values, accs: make([]accumulator, len(w.aggregates))}
-			byKey[key.String()] = g
+			byKey[string(key)] = g
 			groups = append(groups, g)
 		}
 		for j, a := range w.aggregates {

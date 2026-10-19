@@ -47,7 +47,7 @@ func TestRun(t *testing.T) {
 		{"where=acres+%2B+1+=+6&returnCountOnly=true", `{"count":1}`},
 		{"where=1=1&returnIdsOnly=true&orderByFields=acres DESC", `{"objectIdFieldName":"feature_id","objectIds":[1,3,2]}`},
 		{"outStatistics=" + url.QueryEscape(`[{"statisticType":"sum","onStatisticField":"acres","outStatisticFieldName":"s"}]`) + "&groupByFieldsForStatistics=kind",
-			`{"displayFieldName":"","fields":[{"name":"s","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"s","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"kind":"Pond"}}]}`},
+			`{"displayFieldName":"","fields":[{"name":"s","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"s","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"s":null,"kind":"Pond"}}]}`},
 		{"geometry=-111.5,40.1,-111.4,40.2&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[1]}`},
 		{"geometry=-112.5,39.5,-110.5,41.5&spatialRel=esriSpatialRelContains&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[1]}`},
 		{"geometry=-111.5,40.1,-111.4,40.2&spatialRel=esriSpatialRelContains&returnIdsOnly=true", `{"objectIdFieldName":"feature_id","objectIds":[]}`},

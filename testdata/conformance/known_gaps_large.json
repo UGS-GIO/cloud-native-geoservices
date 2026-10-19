@@ -104,13 +104,6 @@
    "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
   {"match": [
-   "*/stats*: features[].attributes.stddev_v (value)"],
-   "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
-  {"match": [
-   "*/stats-string: features[].attributes.min_v (missing)",
-   "*/stats-string: features[].attributes.max_v (missing)"],
-   "reason": "min and max of a string field are left out."},
-  {"match": [
    "*/stats*: fields[*].type (value)",
    "*/stats*: fields[*].length (missing)"],
    "reason": "Statistics fields are not typed by their source: count is a double (Esri: integer), min and max of an integer field are doubles, and string and date results have no length."},
