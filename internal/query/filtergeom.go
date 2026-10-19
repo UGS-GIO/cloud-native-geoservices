@@ -46,7 +46,7 @@ func filterGeometry(v any, inSR any) (orb.Geometry, error) {
 		}
 	case map[string]any:
 		if sr, ok := x["spatialReference"]; ok {
-			srid, _ = wkid(sr)
+			srid, _ = geom.Wkid(sr)
 		}
 		var err error
 		if g, err = esriToGeometry(x); err != nil {
@@ -56,7 +56,7 @@ func filterGeometry(v any, inSR any) (orb.Geometry, error) {
 		return nil, Bad("Invalid geometry")
 	}
 	if srid == 0 && inSR != nil {
-		srid, _ = wkid(inSR)
+		srid, _ = geom.Wkid(inSR)
 	}
 	if srid != 0 && !supported(srid) {
 		return nil, Bad("Unsupported spatial reference: " + strconv.Itoa(srid))

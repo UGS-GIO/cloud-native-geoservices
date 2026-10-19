@@ -10,7 +10,6 @@ import (
 	"math"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/paulmach/orb"
@@ -68,30 +67,10 @@ func parseJSON(s string) any {
 	return s
 }
 
-var digits = regexp.MustCompile(`^\d+$`)
-
-// WkidOf reads a spatial reference: a number, digits, or {latestWkid, wkid}; 0 when absent.
+// WkidOf is geom.Wkid, 0 when absent or unreadable.
 func WkidOf(v any) int {
-	if s, ok := v.(string); ok {
-		v = parseJSON(s)
-	}
-	switch x := v.(type) {
-	case float64:
-		return int(x)
-	case string:
-		if digits.MatchString(x) {
-			n, _ := strconv.Atoi(x)
-			return n
-		}
-	case map[string]any:
-		if w, ok := x["latestWkid"].(float64); ok {
-			return int(w)
-		}
-		if w, ok := x["wkid"].(float64); ok {
-			return int(w)
-		}
-	}
-	return 0
+	n, _ := geom.Wkid(v)
+	return n
 }
 
 func isTrue(v string) bool { return v == "true" }

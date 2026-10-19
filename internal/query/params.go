@@ -118,7 +118,7 @@ func (p Params) Validate() error {
 		}
 	}
 	if v, ok := p["outSR"]; ok {
-		if _, ok := wkid(v); !ok {
+		if _, ok := geom.Wkid(v); !ok {
 			m := `"outSR" does not match any of the allowed types`
 			return Bad(m, m)
 		}
@@ -139,12 +139,12 @@ func (p Params) Validate() error {
 		}
 	}
 	if v, ok := p["outSR"]; ok {
-		if id, _ := wkid(v); outputSRs[id].Wkid == 0 {
+		if id, _ := geom.Wkid(v); outputSRs[id].Wkid == 0 {
 			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785) are supported")
 		}
 	}
 	if v, ok := p["inSR"]; ok {
-		if id, ok := wkid(v); ok && !supported(id) {
+		if id, ok := geom.Wkid(v); ok && !supported(id) {
 			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785, 900913) are supported")
 		}
 	}
@@ -172,28 +172,6 @@ func supported(id int) bool {
 		return true
 	}
 	return false
-}
-
-// wkid reads a spatial reference given as a number or {wkid, latestWkid}.
-func wkid(v any) (int, bool) {
-	switch x := v.(type) {
-	case float64:
-		if isInt(x) {
-			return int(x), true
-		}
-	case string:
-		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return n, true
-		}
-	case map[string]any:
-		if w, ok := x["wkid"].(float64); ok && isInt(w) {
-			return int(w), true
-		}
-		if w, ok := x["latestWkid"].(float64); ok && isInt(w) {
-			return int(w), true
-		}
-	}
-	return 0, false
 }
 
 // Quantization is the PBF transform a client asks for.

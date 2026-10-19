@@ -282,7 +282,7 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 
 	outID := 4326
 	if v, ok := p["outSR"]; ok {
-		outID, _ = wkid(v)
+		outID, _ = geom.Wkid(v)
 	}
 	w.outSR = outputSRs[outID]
 	w.toSR = w.outSR.project()
