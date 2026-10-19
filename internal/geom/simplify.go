@@ -177,7 +177,8 @@ func (r *reader) line(dims int) (orb.LineString, error) {
 }
 
 // collapsed is the stand-in for an outer ring that kept too few points: its bounding box when that
-// fits within tolerance, else the ring at a finer tolerance, so a long thin sliver keeps its shape.
+// fits within tolerance, else the ring at a finer tolerance, so a long thin sliver keeps its shape,
+// or past that the sliver as a triangle.
 func (r *reader) collapsed() (ring orb.Ring, speck bool) {
 	x0, y0, x1, y1 := math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)
 	for i := range r.xs {
@@ -187,12 +188,32 @@ func (r *reader) collapsed() (ring orb.Ring, speck bool) {
 	if len(r.xs) < 4 || x1-x0 <= r.tol && y1-y0 <= r.tol {
 		return orb.Ring{{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}, {x0, y0}}, true
 	}
-	for _, t := range []float64{r.tol / 4, r.tol / 16, 0} {
-		if out := r.pick(t); len(out) >= 4 || t == 0 {
+	for _, t := range []float64{r.tol / 4, r.tol / 16} {
+		if out := r.pick(t); len(out) >= 4 {
 			return out, false
 		}
 	}
-	return nil, false
+	return r.triangle(), false
+}
+
+// triangle is the ring through the first point and the points farthest from it and from that line.
+func (r *reader) triangle() orb.Ring {
+	xs, ys, n := r.xs, r.ys, len(r.xs)
+	far, worst := 0, -1.0
+	for i := range n {
+		if d := (xs[i]-xs[0])*(xs[i]-xs[0]) + (ys[i]-ys[0])*(ys[i]-ys[0]); d > worst {
+			far, worst = i, d
+		}
+	}
+	side, worst := 0, -1.0
+	dx, dy := xs[far]-xs[0], ys[far]-ys[0]
+	for i := range n {
+		if d := math.Abs(dx*(ys[i]-ys[0]) - dy*(xs[i]-xs[0])); d > worst {
+			side, worst = i, d
+		}
+	}
+	a, b := min(far, side), max(far, side)
+	return orb.Ring{{xs[0], ys[0]}, {xs[a], ys[a]}, {xs[b], ys[b]}, {xs[0], ys[0]}}
 }
 
 func (r *reader) polygon(dims int) (orb.Polygon, error) {
