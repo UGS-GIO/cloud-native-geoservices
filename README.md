@@ -123,11 +123,12 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 `/query` accepts GET and POST. Supported parameters:
 
 - `where`: SQL subset (comparisons, `AND`/`OR`/`NOT`, `IN`, `LIKE`, `IS NULL`, `BETWEEN`,
-  `+ - * /` and `||`, `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals), evaluated as on ArcGIS Online: field names
-  match case-insensitively, strings compare and sort ignoring case, a literal converts to the
-  type of the field it meets (`FIPS = '49035'`, `UPDATED > '2020-01-01'`), other type
-  mismatches are a 400, and a comparison with a null is unknown, so `NOT` does not match it. A
-  query needs a `where` unless it has `objectIds`, `geometry` or `outStatistics`.
+  `+ - * /` and `||`, `UPPER`/`LOWER`, `DATE` and `TIMESTAMP` literals), evaluated as on ArcGIS
+  Online: field names match case-insensitively, strings compare and sort ignoring case (and
+  hyphens and apostrophes, as SQL Server sorts words), a literal converts to the type of the
+  field it meets (`FIPS = '49035'`, `UPDATED > '2020-01-01'`), other type mismatches are a 400,
+  and a comparison with a null is unknown, so `NOT` does not match it. A query needs a `where`
+  unless it has `objectIds`, `geometry` or `outStatistics`.
 - `objectIds`, `outFields`, `returnGeometry`, `orderByFields`, `resultOffset`,
   `resultRecordCount`, `resultType=tile`, `maxAllowableOffset`, `geometryPrecision`.
 - `geometry` (envelope, point, multipoint, polyline, polygon), `geometryType`, `inSR`,

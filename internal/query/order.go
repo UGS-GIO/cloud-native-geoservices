@@ -3,13 +3,13 @@ package query
 import (
 	"cmp"
 	"slices"
-	"strings"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/where"
 )
 
 // sorted orders feature indexes by orderByFields as SQL does: nulls first ascending and last
-// descending, strings ignoring case. The sort is stable.
+// descending, strings as where.CompareText orders them. The sort is stable.
 func (w *winnow) sorted(idx []int) []int {
 	if len(w.order) == 0 {
 		return idx
@@ -47,7 +47,7 @@ func compareKeys(a, b any, desc bool) int {
 		if xok && yok {
 			c = cmp.Compare(x, y)
 		} else {
-			c = strings.Compare(strings.ToLower(sa), strings.ToLower(sb))
+			c = where.CompareText(sa, sb)
 		}
 	}
 	if desc {

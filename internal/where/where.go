@@ -2,8 +2,8 @@
 // = <> != < <= > >=, AND/OR/NOT, parentheses, [NOT] IN, [NOT] LIKE, IS [NOT] NULL, [NOT] BETWEEN,
 // + - * / and || arithmetic, UPPER/LOWER, TRUE/FALSE, string, number, DATE and TIMESTAMP literals. It follows ArcGIS Online
 // hosted layers: logic is SQL's three-valued one, a literal converts to the type of the field it
-// is compared with, and other type mismatches are errors. Strings compare ignoring case (collation
-// caseSensitive false), LIKE included. Field names match case-insensitively.
+// is compared with, and other type mismatches are errors. Strings compare as CompareText orders
+// them, LIKE ignoring case. Field names match case-insensitively.
 package where
 
 import (
@@ -702,7 +702,7 @@ func (e notExpr) eval(row Row) any {
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
-// compare orders two non-null values of one type, strings ignoring case.
+// compare orders two non-null values of one type.
 func compare(a, b any) int {
 	if x, ok := a.(float64); ok {
 		y := b.(float64)
@@ -714,7 +714,19 @@ func compare(a, b any) int {
 		}
 		return 0
 	}
-	return strings.Compare(strings.ToLower(a.(string)), strings.ToLower(b.(string)))
+	return CompareText(a.(string), b.(string))
+}
+
+var wordSort = strings.NewReplacer("-", "", "'", "")
+
+// CompareText orders strings as ArcGIS Online hosted layers do (SQL Server's case-insensitive
+// word sort): ignoring case, and hyphens and apostrophes unless the rest is equal.
+func CompareText(a, b string) int {
+	a, b = strings.ToLower(a), strings.ToLower(b)
+	if c := strings.Compare(wordSort.Replace(a), wordSort.Replace(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }
 
 func (e cmpExpr) eval(row Row) any {

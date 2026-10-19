@@ -69,7 +69,7 @@ type accumulator struct {
 	count      int64
 	nums       int64
 	sum, sumSq float64
-	min, max   any // numbers, or strings ignoring case
+	min, max   any // numbers, or strings in where.CompareText order
 }
 
 func (a *accumulator) add(v any) {

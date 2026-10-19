@@ -32,6 +32,7 @@ func TestMatch(t *testing.T) {
 		{"wetland_type <> 'LAKE'", lake, false},
 		{"wetland_type IN ('lake')", lake, true},
 		{"wetland_type > 'kz'", lake, true},
+		{"name BETWEEN 'UTAHL' AND 'UTAHM' AND name <> 'utahlake'", row(nil, nil, "Utah-Lake"), true}, // word sort
 		{"wetland_type IN ('Lake','Freshwater Pond') AND acres > 1", lake, true},
 		{"wetland_type NOT IN ('Lake')", lake, false},
 		{"wetland_type LIKE 'la%'", lake, true},
