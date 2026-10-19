@@ -127,8 +127,10 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
   Online: field names match case-insensitively, strings compare and sort ignoring case (and
   hyphens and apostrophes, as SQL Server sorts words), a literal converts to the type of the
   field it meets (`FIPS = '49035'`, `UPDATED > '2020-01-01'`), other type mismatches are a 400,
-  and a comparison with a null is unknown, so `NOT` does not match it. A query needs a `where`
-  unless it has `objectIds`, `geometry` or `outStatistics`.
+  and a comparison with a null is unknown, so `NOT` does not match it. `LIKE` reads a number or
+  date as SQL Server writes it (`38.7973`, `4.00911e+006`, `2011-08-11 09:00:00.0000000`), and
+  integer arithmetic past 32 bits is a 400. A query needs a `where` unless it has `objectIds`,
+  `geometry` or `outStatistics`.
 - `objectIds`, `outFields`, `returnGeometry`, `orderByFields`, `resultOffset`,
   `resultRecordCount`, `resultType=tile`, `maxAllowableOffset`, `geometryPrecision`.
 - `geometry` (envelope, point, multipoint, polyline, polygon), `geometryType`, `inSR`,

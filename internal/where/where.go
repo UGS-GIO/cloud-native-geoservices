@@ -309,7 +309,7 @@ func (p *parser) predicate() (node, error) {
 			}
 			esc = t.text
 		}
-		if l.k == kBool || l.k == kDate || pat.k != kNull && pat.k != kStr && !(pat.lit && pat.k == kNum) {
+		if l.k == kBool || pat.k != kNull && pat.k != kStr && !(pat.lit && pat.k == kNum) {
 			return l, errSyntax
 		}
 		return pred(&likeExpr{text(l), text(pat), esc, neg, map[string]*regexp.Regexp{}, p.clause})
@@ -390,6 +390,15 @@ func (p *parser) value() (node, error) {
 					v.e = lit{-v.e.(lit).v.(float64)}
 				}
 				return v, nil
+			} else if n.kind == tIdent && p.peek().kind != tLParen {
+				v, err := p.column(n.text)
+				if err != nil || v.k != kNum {
+					return v, errSyntax
+				}
+				if t.text == "-" {
+					v.e = arithExpr{"-", lit{0.0}, v.e, v.int, p.clause}
+				}
+				return v, nil
 			}
 		}
 	case tKeyword:
@@ -453,7 +462,7 @@ func (p *parser) value() (node, error) {
 }
 
 func numLit(t token) node {
-	return node{e: lit{t.num}, k: kNum, lit: true, int: !strings.ContainsAny(t.text, ".eE")}
+	return node{e: lit{t.num}, k: kNum, lit: true, int: !strings.ContainsAny(t.text, ".eE") && t.num <= math.MaxInt32}
 }
 
 func (p *parser) column(name string) (node, error) {
@@ -550,8 +559,8 @@ func parseNum(s string, integral bool) (float64, bool) {
 
 // text is n as a string, for LIKE and UPPER/LOWER.
 func text(n node) expr {
-	if n.k == kNum {
-		return toText{n.e}
+	if n.k == kNum || n.k == kDate {
+		return toText{n.e, n.k, n.int}
 	}
 	return n.e
 }
@@ -569,7 +578,11 @@ func parseTime(s string) (float64, error) {
 
 type lit struct{ v any }
 type field int
-type toText struct{ e expr }
+type toText struct {
+	e   expr
+	k   kind
+	int bool
+}
 type toNum struct {
 	e      expr
 	int    bool
@@ -640,11 +653,22 @@ func (e field) eval(row Row) any {
 	}
 }
 
+// eval writes a number or date as SQL Server converts a float or datetime2 to text.
 func (e toText) eval(row Row) any {
-	if f, ok := e.e.eval(row).(float64); ok {
+	f, ok := e.e.eval(row).(float64)
+	switch {
+	case !ok:
+		return nil
+	case e.k == kDate:
+		return time.UnixMilli(int64(f)).UTC().Format("2006-01-02 15:04:05.0000000")
+	case e.int:
 		return jsonx.NumberString(f)
 	}
-	return nil
+	s := strconv.FormatFloat(f, 'g', 6, 64)
+	if i := strings.IndexByte(s, 'e'); i >= 0 && len(s)-i == 4 {
+		s = s[:i+2] + "0" + s[i+2:] // e+06 is e+006
+	}
+	return s
 }
 
 func (e toNum) eval(row Row) any {
@@ -687,22 +711,29 @@ func (e arithExpr) eval(row Row) any {
 		e.clause.bad = true
 		return nil
 	}
+	var r float64
 	switch e.op {
 	case "+":
-		return x + y
+		r = x + y
 	case "-":
-		return x - y
+		r = x - y
 	case "*":
-		return x * y
+		r = x * y
+	default:
+		if y == 0 {
+			e.clause.bad = true // divide by zero
+			return nil
+		}
+		r = x / y
+		if e.int {
+			r = math.Trunc(r)
+		}
 	}
-	if y == 0 {
-		e.clause.bad = true // divide by zero
+	if e.int && (r < math.MinInt32 || r > math.MaxInt32) {
+		e.clause.bad = true // SQL Server's int overflows
 		return nil
 	}
-	if e.int {
-		return math.Trunc(x / y)
-	}
-	return x / y
+	return r
 }
 
 func (e notExpr) eval(row Row) any {
