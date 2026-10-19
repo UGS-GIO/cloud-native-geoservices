@@ -65,7 +65,14 @@ var gzipCoding = &coding{"gzip",
 
 var codings = map[string]*coding{
 	"gzip": gzipCoding,
-	"br": {"br", pooled(func() resetWriter { return brotli.NewWriterLevel(nil, 4) }),
+	// A reset brotli writer keeps state that changes its next output, so each body gets a new one.
+	"br": {"br", func(body []byte) []byte {
+		var out bytes.Buffer
+		w := brotli.NewWriterLevel(&out, 4)
+		w.Write(body)
+		w.Close()
+		return out.Bytes()
+	},
 		func(b []byte) ([]byte, error) { return io.ReadAll(brotli.NewReader(bytes.NewReader(b))) }},
 	"zstd": {"zstd", func(body []byte) []byte { return zstdEncoder.EncodeAll(body, make([]byte, 0, len(body)/3)) },
 		func(b []byte) ([]byte, error) { return zstdDecoder.DecodeAll(b, nil) }},
