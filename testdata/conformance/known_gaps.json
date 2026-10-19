@@ -84,33 +84,12 @@
  ],
  "known": [
   {"match": [
-   "*/count-extent: extent.xmin (value)",
-   "*/count-extent: extent.ymin (value)",
-   "*/count-extent: extent.xmax (value)",
-   "*/count-extent: extent.ymax (value)"],
-   "reason": "returnCountOnly with returnExtentOnly gives the count and a null extent. The JS API's queryExtent() sends both, so zoom to features fails."},
-  {"match": [
-   "*/count-point-distance: count (value)"],
-   "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},
-  {"match": [
-   "*/count-point-json-distance: count (value)",
-   "*/count-point-meters: count (value)"],
-   "reason": "distance and units only widen the row-group prefilter; the exact test uses the bare point."},
-  {"match": [
    "*/error-where-field: error (missing)",
    "*/error-where-field: count (extra)",
    "*/error-outfields: *",
    "*/error-orderby: *",
    "*/error-stats-field: *"],
    "reason": "An unknown field in where, outFields, orderByFields or outStatistics is not an error: where matches nothing, outFields and orderByFields are dropped, and the statistic is empty."},
-  {"match": [
-   "railroads/count-strwhere-lower: count (value)",
-   "*/distinct-ordered: features[].attributes.* (value)",
-   "*/stats-grouped-ordered: features[].attributes.* (value)"],
-   "reason": "Esri's hosted layers compare and sort strings case-insensitively (collation caseSensitive false). We compare with = and sort byte by byte."},
-  {"match": [
-   "municipalities/ids-within-point: objectIds (length)"],
-   "reason": "spatialRel=esriSpatialRelWithin with a point inside a polygon feature finds nothing."},
   {"match": [
    "*/stats*: features[].attributes.stddev_v (value)"],
    "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},

@@ -42,7 +42,7 @@ func TestStream(t *testing.T) {
 		{box, true},
 		{with("returnIdsOnly", "true"), true},
 		{with("spatialRel", "esriSpatialRelWithin"), true},
-		{with("returnExtentOnly", "true"), false},
+		{with("returnExtentOnly", "true"), true},
 		{with("f", "geojson"), false},
 		{map[string]string{"returnCountOnly": "true", "where": "acres > 1"}, false},
 	}
@@ -93,12 +93,12 @@ func TestFilterBox(t *testing.T) {
 	if box == nil || math.Abs(box[0]-(-112.5)) > 1e-3 || math.Abs(box[3]-40.979) > 1e-2 {
 		t.Errorf("mercator box %v", box)
 	}
-	pad := FilterBox(map[string]string{"geometry": "-112,40", "distance": "1", "units": "esriSRUnit_Kilometer"})
-	if pad != nil {
-		t.Errorf("x,y is not a box: %v", pad)
-	}
-	if b := FilterBox(map[string]string{"geometry": `{"x":-112,"y":40}`, "distance": "1113.2"}); b == nil || math.Abs(b[2]-b[0]-0.02) > 1e-9 {
-		t.Errorf("distance pads the box: %v", b)
+	// 1 km is about 0.009° of latitude and, at 40°N, 0.0117° of longitude.
+	for _, g := range []string{"-112,40", `{"x":-112,"y":40}`} {
+		b := FilterBox(map[string]string{"geometry": g, "distance": "1", "units": "esriSRUnit_Kilometer"})
+		if b == nil || math.Abs(b[3]-b[1]-0.0181) > 2e-4 || math.Abs(b[2]-b[0]-0.0235) > 2e-4 {
+			t.Errorf("%s: distance pads the box by latitude: %v", g, b)
+		}
 	}
 	if FilterBox(map[string]string{"geometry": "1,2,3,4", "inSR": "2263"}) != nil {
 		t.Error("an SR we do not project has no prefilter")

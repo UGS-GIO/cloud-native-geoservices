@@ -90,13 +90,12 @@
    "reason": "These layers are AGOL views of static data; that describes the hosting."},
   {"match": [
    "*/count: extent (missing)"],
-   "reason": "For where=1=1 these layers answer returnCountOnly from cached estimates, which include an extent."}
+   "reason": "For where=1=1 these layers answer returnCountOnly from cached estimates, which include an extent."},
+  {"match": [
+   "*/count-extent-envelope: *"],
+   "reason": "AGOL gives up on this count and extent after 55 s with a 400, so it is not a reference; a local check with DuckDB over the copy agrees with our answer."}
  ],
  "known": [
-  {"match": [
-   "rail_lines/extent-where: extent.* (value)",
-   "rail_lines/extent-3857: extent.* (value)"],
-   "reason": "returnExtentOnly with a where whose matches span more than MAX_GEOMETRY_ROWS (50000) rows gives the extent of only part of them, not an error."},
   {"match": [
    "*/features-where: features (length)",
    "*/features-where: features[] (extra)",
@@ -104,19 +103,6 @@
    "*/distinct-two: features (length)",
    "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
-  {"match": [
-   "*/count-extent: extent.xmin (value)",
-   "*/count-extent: extent.ymin (value)",
-   "*/count-extent: extent.xmax (value)",
-   "*/count-extent: extent.ymax (value)"],
-   "reason": "returnCountOnly with returnExtentOnly gives the count and a null extent. The JS API's queryExtent() sends both, so zoom to features fails."},
-  {"match": [
-   "*/count-point-distance: count (value)"],
-   "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},
-  {"match": [
-   "*/count-point-json-distance: count (value)",
-   "*/count-point-meters: count (value)"],
-   "reason": "distance and units only widen the row-group prefilter; the exact test uses the bare point."},
   {"match": [
    "*/error-where-field: error (missing)",
    "*/error-where-field: count (extra)",
@@ -127,9 +113,6 @@
   {"match": [
    "*/stats*: features[].attributes.stddev_v (value)"],
    "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
-  {"match": [
-   "rail_lines/count-strwhere-lower: count (value)"],
-   "reason": "Esri's hosted layers compare strings case-insensitively (collation caseSensitive false); = here is case-sensitive."},
   {"match": [
    "*/stats-string: features[].attributes.min_v (missing)",
    "*/stats-string: features[].attributes.max_v (missing)"],

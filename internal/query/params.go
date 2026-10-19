@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 )
 
 // Params are the request parameters as Koop normalizes them: body then query (query wins),
@@ -122,6 +124,11 @@ func (p Params) Validate() error {
 	if v, ok := p["spatialRel"]; ok {
 		if s, _ := v.(string); !slices.Contains(spatialRels, s) {
 			return Bad("'spatialRel' parameter is invalid", `"spatialRel" must be one of [`+strings.Join(spatialRels, ", ")+`]`)
+		}
+	}
+	if v, ok := p["units"]; ok {
+		if s, _ := v.(string); typeOf(v) != "number" && !geom.Unit(s) {
+			return Bad("'units' parameter is invalid")
 		}
 	}
 	for _, k := range []string{"outSR", "inSR"} {

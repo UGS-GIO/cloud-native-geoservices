@@ -219,3 +219,25 @@ func TestPlaceGrid(t *testing.T) {
 		t.Error("no grid")
 	}
 }
+
+func TestNear(t *testing.T) {
+	n := NewNear(orb.Point{-112, 40}, 1000) // a degree of latitude is 111.0 km here, of longitude 85.4 km
+	for _, tt := range []struct {
+		g    orb.Geometry
+		want bool
+	}{
+		{orb.Point{-112, 40.0089}, true},
+		{orb.Point{-112, 40.0091}, false},
+		{orb.Point{-111.9884, 40}, true},
+		{orb.Point{-111.9881, 40}, false},
+		{orb.LineString{{-112.01, 40.005}, {-111.99, 40.005}}, true},
+		{orb.Polygon{{{-113, 39}, {-111, 39}, {-111, 41}, {-113, 39}}}, true},
+	} {
+		if got := n.Match(tt.g); got != tt.want {
+			t.Errorf("%v: %v", tt.g, got)
+		}
+	}
+	if Meters(2, "esriSRUnit_StatuteMile") != 3218.688 || Meters(2, "") != 2 {
+		t.Error("units")
+	}
+}
