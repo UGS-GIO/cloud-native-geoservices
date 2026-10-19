@@ -264,8 +264,8 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 				return nil, Bad("'" + strings.TrimSpace(part) + "' parameter is invalid")
 			}
 			k.desc = len(words) == 2 && strings.EqualFold(words[1], "DESC")
-			if name, i, ok := c.field(k.name); ok {
-				k.name, k.prop = name, i
+			if f, i, ok := c.field(k.name); ok {
+				k.name, k.prop = f.Name, i
 			} else if !w.outputName(k.name) {
 				return nil, Bad("'" + k.name + "' parameter is invalid")
 			}
@@ -301,12 +301,8 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 }
 
 func (w *winnow) resolve(name string) (int, string, bool) {
-	for _, f := range w.c.Meta.Fields {
-		if i := w.c.propIndex(f.Name); i >= 0 && strings.EqualFold(f.Name, name) {
-			return i, f.Type, true
-		}
-	}
-	return 0, "", false
+	f, i, ok := w.c.field(name)
+	return i, f.Type, ok && i >= 0
 }
 
 // filter returns the indexes of the features that pass where, objectIds and the geometry

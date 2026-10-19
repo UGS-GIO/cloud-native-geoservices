@@ -7,6 +7,7 @@ import (
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 )
 
 // Feature is one provider feature: its property values (aligned with Collection.Props) and its
@@ -30,14 +31,14 @@ type Collection struct {
 	Next func() ([]Feature, error)
 }
 
-// field finds a layer field by name in any case: its name, and its index in Props (-1 if not read).
-func (c *Collection) field(name string) (string, int, bool) {
+// field finds a layer field by name in any case, and its index in Props (-1 if not read).
+func (c *Collection) field(name string) (pq.Column, int, bool) {
 	for _, f := range c.Meta.Fields {
 		if strings.EqualFold(f.Name, name) {
-			return f.Name, c.propIndex(f.Name), true
+			return f, c.propIndex(f.Name), true
 		}
 	}
-	return "", -1, false
+	return pq.Column{}, -1, false
 }
 
 func (c *Collection) propIndex(name string) int {

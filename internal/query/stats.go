@@ -45,9 +45,11 @@ func (w *winnow) parseStatistics() error {
 		default:
 			return Bad("Unsupported statisticType: " + kind)
 		}
-		if a.field, a.prop, ok = w.c.field(field); !ok {
+		f, i, ok := w.c.field(field)
+		if !ok {
 			return Bad("Invalid onStatisticField: " + field)
 		}
+		a.field, a.prop = f.Name, i
 		w.aggregates = append(w.aggregates, a)
 	}
 	if s, ok := w.p.String("groupByFieldsForStatistics"); ok {
