@@ -469,8 +469,8 @@ func (w *winnow) geojson(idx []int) []any {
 }
 
 // extentOf covers the selected features: from the bbox covering columns when the provider read
-// them, else from their geometry.
-func (w *winnow) extentOf(idx []int) jsonx.Obj {
+// them, else from their geometry. It is null when nothing has a geometry.
+func (w *winnow) extentOf(idx []int) any {
 	b := geom.Bounds(nil)
 	cols := make([]int, len(pq.BBox))
 	for k, name := range pq.BBox {
@@ -495,7 +495,10 @@ func (w *winnow) extentOf(idx []int) jsonx.Obj {
 			b = b.Union(orb.Bound{Min: orb.Point{v[0], v[1]}, Max: orb.Point{v[2], v[3]}})
 		}
 	}
-	if w.toMercator && b.Min[0] <= b.Max[0] {
+	if b.Min[0] > b.Max[0] {
+		return nil
+	}
+	if w.toMercator {
 		b.Min[0], b.Min[1] = geom.ExtentToMercator(b.Min[0], b.Min[1])
 		b.Max[0], b.Max[1] = geom.ExtentToMercator(b.Max[0], b.Max[1])
 	}
