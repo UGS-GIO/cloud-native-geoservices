@@ -131,6 +131,7 @@ func Features(fs *query.FeatureSet, t Transform) []byte {
 		b = message(b, 13, fb)
 	}
 	var fb, vb, gb []byte
+	var sc scratch
 	// Attributes go out sorted by name. Features share one key order, so the sort is worked out
 	// once and reused while the keys match.
 	var keys []string
@@ -146,7 +147,7 @@ func Features(fs *query.FeatureSet, t Transform) []byte {
 			fb = message(fb, 1, vb)
 		}
 		if ft.Geom != nil {
-			gb = geometry(gb[:0], ft.Geom, t)
+			gb = sc.geometry(gb[:0], ft.Geom, t)
 			fb = message(fb, 2, gb)
 		}
 		b = message(b, 15, fb)
@@ -248,17 +249,22 @@ func quantize(pts []orb.Point, t Transform, coords []int64) ([]int64, int) {
 	return coords, n
 }
 
-func geometry(b []byte, g *geom.Esri, t Transform) []byte {
-	var lengths []uint32
-	var coords []int64
+// scratch holds one geometry's lengths and coordinates, reused from feature to feature.
+type scratch struct {
+	lengths []uint32
+	coords  []int64
+}
+
+func (s *scratch) geometry(b []byte, g *geom.Esri, t Transform) []byte {
+	lengths, coords := s.lengths[:0], s.coords[:0]
 	switch g.Kind {
 	case geom.EsriPoint:
-		coords = []int64{round((g.X - t.XTranslate) / t.XScale), round((t.YTranslate - g.Y) / t.YScale)}
-		lengths = []uint32{2}
+		coords = append(coords, round((g.X-t.XTranslate)/t.XScale), round((t.YTranslate-g.Y)/t.YScale))
+		lengths = append(lengths, 2)
 	case geom.EsriMultipoint:
 		var n int
 		coords, n = quantize(g.Parts[0], t, coords)
-		lengths = []uint32{uint32(n)}
+		lengths = append(lengths, uint32(n))
 	default:
 		for _, part := range g.Parts {
 			before := len(coords)
@@ -271,6 +277,7 @@ func geometry(b []byte, g *geom.Esri, t Transform) []byte {
 			}
 		}
 	}
+	s.lengths, s.coords = lengths, coords
 	b = packed(b, 2, lengths, func(l uint32) uint64 { return uint64(l) })
 	return packed(b, 3, coords, protowire.EncodeZigZag)
 }
@@ -280,9 +287,14 @@ func packed[T any](b []byte, num protowire.Number, xs []T, enc func(T) uint64) [
 	if len(xs) == 0 {
 		return b
 	}
-	var body []byte
+	size := 0
 	for _, x := range xs {
-		body = protowire.AppendVarint(body, enc(x))
+		size += protowire.SizeVarint(enc(x))
 	}
-	return message(b, num, body)
+	b = protowire.AppendTag(b, num, protowire.BytesType)
+	b = protowire.AppendVarint(b, uint64(size))
+	for _, x := range xs {
+		b = protowire.AppendVarint(b, enc(x))
+	}
+	return b
 }

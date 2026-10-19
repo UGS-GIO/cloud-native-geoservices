@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
+	"sync"
 
 	"github.com/paulmach/orb"
 )
@@ -14,61 +16,88 @@ import (
 // tolerance and stands in as its bounding box, so the caller can thin overlapping specks.
 type Shape struct {
 	G     orb.Geometry
+	Bound orb.Bound // Bounds(G)
 	Speck bool
 }
 
-// keep marks which of n points survive Douglas-Peucker at tolerance (degrees).
-func keep(xs, ys []float64, tolerance float64) []bool {
-	n := len(xs)
-	kept := make([]bool, n)
-	if n == 0 {
-		return kept
-	}
-	kept[0], kept[n-1] = true, true
-	if n <= 2 || tolerance <= 0 {
+// keep marks in r.kept which points of r.xs, r.ys survive Douglas-Peucker at tol (degrees).
+func (r *reader) keep(tol float64) {
+	xs, ys, n := r.xs, r.ys, len(r.xs)
+	r.kept = slices.Grow(r.kept[:0], n)[:n]
+	kept := r.kept
+	if n <= 2 || tol <= 0 {
 		for i := range kept {
 			kept[i] = true
 		}
-		return kept
+		return
 	}
-	t2 := tolerance * tolerance
-	stack := []int{0, n - 1}
+	clear(kept)
+	kept[0], kept[n-1] = true, true
+	t2 := tol * tol
+	stack := append(r.stack[:0], 0, n-1)
 	for len(stack) > 0 {
 		a, b := stack[len(stack)-2], stack[len(stack)-1]
 		stack = stack[:len(stack)-2]
-		dx, dy := xs[b]-xs[a], ys[b]-ys[a]
+		ax, ay := xs[a], ys[a]
+		dx, dy := xs[b]-ax, ys[b]-ay
 		len2 := dx*dx + dy*dy
+		// Squared distances times len2 (when not 0), so the loop needs no division.
+		scale := len2
+		if len2 == 0 {
+			scale = 1
+		}
 		worst, index := -1.0, -1
 		for i := a + 1; i < b; i++ {
-			t := 0.0
-			if len2 != 0 {
-				t = ((xs[i]-xs[a])*dx + (ys[i]-ys[a])*dy) / len2
+			px, py := xs[i]-ax, ys[i]-ay
+			var d2 float64
+			switch dot := px*dx + py*dy; {
+			case dot <= 0 || len2 == 0:
+				d2 = (px*px + py*py) * scale
+			case dot >= len2:
+				qx, qy := xs[i]-xs[b], ys[i]-ys[b]
+				d2 = (qx*qx + qy*qy) * scale
+			default:
+				c := px*dy - py*dx
+				d2 = c * c
 			}
-			if t < 0 {
-				t = 0
-			} else if t > 1 {
-				t = 1
-			}
-			ex, ey := xs[i]-(xs[a]+t*dx), ys[i]-(ys[a]+t*dy)
-			if d2 := ex*ex + ey*ey; d2 > worst {
+			if d2 > worst {
 				worst, index = d2, i
 			}
 		}
-		if worst > t2 {
+		if worst > t2*scale {
 			kept[index] = true
 			stack = append(stack, a, index, index, b)
 		}
 	}
-	return kept
+	r.stack = stack
 }
 
 type reader struct {
 	b      []byte
 	off    int
-	order  binary.ByteOrder
+	big    bool // byte order of the current geometry
 	whole  bool // some polygon ring survived
 	tol    float64
 	xs, ys []float64 // scratch for one run of points
+	kept   []bool
+	stack  []int
+}
+
+// readers keeps the scratch slices between calls.
+var readers = sync.Pool{New: func() any { return new(reader) }}
+
+func (r *reader) u32(off int) uint32 {
+	if r.big {
+		return binary.BigEndian.Uint32(r.b[off:])
+	}
+	return binary.LittleEndian.Uint32(r.b[off:])
+}
+
+func (r *reader) f64(off int) float64 {
+	if r.big {
+		return math.Float64frombits(binary.BigEndian.Uint64(r.b[off:]))
+	}
+	return math.Float64frombits(binary.LittleEndian.Uint64(r.b[off:]))
 }
 
 func (r *reader) need(n int) error {
@@ -83,12 +112,8 @@ func (r *reader) header() (typ uint32, dims int, err error) {
 	if err = r.need(5); err != nil {
 		return
 	}
-	if r.b[r.off] == 1 {
-		r.order = binary.LittleEndian
-	} else {
-		r.order = binary.BigEndian
-	}
-	typ = r.order.Uint32(r.b[r.off+1:])
+	r.big = r.b[r.off] != 1
+	typ = r.u32(r.off + 1)
 	r.off += 5
 	dims = 2
 	if typ&0x80000000 != 0 {
@@ -116,7 +141,7 @@ func (r *reader) uint() (int, error) {
 	if err := r.need(4); err != nil {
 		return 0, err
 	}
-	v := r.order.Uint32(r.b[r.off:])
+	v := r.u32(r.off)
 	r.off += 4
 	return int(v), nil
 }
@@ -125,8 +150,7 @@ func (r *reader) point(dims int) (orb.Point, error) {
 	if err := r.need(8 * dims); err != nil {
 		return orb.Point{}, err
 	}
-	x := math.Float64frombits(r.order.Uint64(r.b[r.off:]))
-	y := math.Float64frombits(r.order.Uint64(r.b[r.off+8:]))
+	x, y := r.f64(r.off), r.f64(r.off+8)
 	r.off += 8 * dims
 	return orb.Point{x, y}, nil
 }
@@ -140,10 +164,9 @@ func (r *reader) run(dims int) ([]orb.Point, error) {
 	if err := r.need(8 * dims * n); err != nil {
 		return nil, err
 	}
-	r.xs, r.ys = r.xs[:0], r.ys[:0]
-	for i := 0; i < n; i++ {
-		r.xs = append(r.xs, math.Float64frombits(r.order.Uint64(r.b[r.off:])))
-		r.ys = append(r.ys, math.Float64frombits(r.order.Uint64(r.b[r.off+8:])))
+	r.xs, r.ys = slices.Grow(r.xs[:0], n)[:n], slices.Grow(r.ys[:0], n)[:n]
+	for i := range n {
+		r.xs[i], r.ys[i] = r.f64(r.off), r.f64(r.off+8)
 		r.off += 8 * dims
 	}
 	return r.pick(r.tol), nil
@@ -151,7 +174,8 @@ func (r *reader) run(dims int) ([]orb.Point, error) {
 
 // pick returns the points of the last run that Douglas-Peucker keeps at tolerance.
 func (r *reader) pick(tolerance float64) []orb.Point {
-	kept := keep(r.xs, r.ys, tolerance)
+	r.keep(tolerance)
+	kept := r.kept
 	count := 0
 	for _, k := range kept {
 		if k {
@@ -286,18 +310,28 @@ func members[S ~[]T, T any](r *reader, n, dims int, read func(int) (T, error)) (
 	return out, nil
 }
 
+// poolPoints caps the scratch a pooled reader keeps, so one huge geometry is not held onto.
+const poolPoints = 1 << 16
+
 // FromWKB reads WKB into a 2D geometry simplified to tolerance (degrees); ok is false for no
 // geometry. Points the simplifier drops are never allocated.
 func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
 	if len(b) == 0 {
 		return Shape{}, false, nil
 	}
-	r := &reader{b: b, tol: tolerance}
+	r := readers.Get().(*reader)
+	defer func() {
+		if cap(r.xs) <= poolPoints {
+			readers.Put(r)
+		}
+	}()
+	r.b, r.off, r.whole, r.tol = b, 0, false, tolerance
 	g, err := r.geometry()
+	r.b = nil
 	if err != nil {
 		return Shape{}, false, err
 	}
-	s := Shape{G: g}
+	s := Shape{G: g, Bound: Bounds(g)}
 	switch g.(type) {
 	case orb.Polygon, orb.MultiPolygon:
 		s.Speck = !r.whole

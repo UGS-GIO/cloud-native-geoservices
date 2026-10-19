@@ -34,7 +34,15 @@ func NewShapes(budget int64) *Shapes { return &Shapes{steps: lru.New[stepKey, *s
 // Step is the power of two at or below tolerance, so a zoom's tiles share one entry.
 func Step(tolerance float64) float64 { return math.Exp2(math.Floor(math.Log2(tolerance))) }
 
-func (s *Shapes) step(file string, tolerance float64) (*step, stepKey) {
+// Cached is one file's shapes at one zoom step.
+type Cached struct {
+	s   *Shapes
+	key stepKey
+	*step
+}
+
+// At returns the shapes of file at tolerance's step; a request resolves it once for all its rows.
+func (s *Shapes) At(file string, tolerance float64) *Cached {
 	key := stepKey{file, Step(tolerance)}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -43,40 +51,38 @@ func (s *Shapes) step(file string, tolerance float64) (*step, stepKey) {
 		e = &step{shapes: map[int64]Shape{}, none: map[int64]bool{}}
 		s.steps.Put(key, e, 0)
 	}
-	return e, key
+	return &Cached{s, key, e}
 }
 
-// Lookup returns the cached shape of feature id at tolerance's step: found reports a cache hit,
-// ok whether the feature has a geometry.
-func (s *Shapes) Lookup(file string, id int64, tolerance float64) (sh Shape, ok, found bool) {
-	e, _ := s.step(file, tolerance)
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if sh, hit := e.shapes[id]; hit {
+// Lookup returns the cached shape of feature id: found reports a cache hit, ok whether the
+// feature has a geometry.
+func (c *Cached) Lookup(id int64) (sh Shape, ok, found bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if sh, hit := c.shapes[id]; hit {
 		return sh, true, true
 	}
-	return Shape{}, false, e.none[id]
+	return Shape{}, false, c.none[id]
 }
 
-// Make simplifies wkb at tolerance's step and caches it. ok is false for no geometry.
-func (s *Shapes) Make(file string, id int64, wkb []byte, tolerance float64) (Shape, bool, error) {
-	e, key := s.step(file, tolerance)
-	sh, ok, err := FromWKB(wkb, key.step)
+// Make simplifies wkb at the step and caches it. ok is false for no geometry.
+func (c *Cached) Make(id int64, wkb []byte) (Shape, bool, error) {
+	sh, ok, err := FromWKB(wkb, c.key.step)
 	if err != nil {
 		return sh, ok, err
 	}
-	e.mu.Lock()
+	c.mu.Lock()
 	if ok {
-		e.shapes[id] = sh
+		c.shapes[id] = sh
 	} else {
-		e.none[id] = true
+		c.none[id] = true
 	}
-	e.mu.Unlock()
+	c.mu.Unlock()
 	n := int64(8)
 	if ok {
 		n = size(sh.G)
 	}
-	s.steps.Grow(key, n)
+	c.s.steps.Grow(c.key, n)
 	return sh, ok, nil
 }
 

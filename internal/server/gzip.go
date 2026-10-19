@@ -2,7 +2,7 @@ package server
 
 import (
 	"bytes"
-	"compress/gzip"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"net/http"
 	"strings"

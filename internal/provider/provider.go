@@ -230,20 +230,28 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	} else if int64(len(rows)) > limit {
 		readRows = rows[:limit+1]
 	}
-	feats, err := pr.features(ctx, source, p, readRows, thin, nil)
+	spatial, _ := params.Spatial() // Run reports a bad one
+	feats, err := pr.features(ctx, source, p, readRows, thin, nil, spatial)
 	if err != nil {
 		return nil, err
 	}
 	// A drawing tile over the limit keeps its largest features, as the vector tiles drop the
 	// smallest: flagging it exceeded makes Map Viewer split it into four and ask again, repeatedly.
 	tile := params["resultType"] == "tile" && thin
+	order := make([]int, len(feats))
+	for i := range order {
+		order[i] = i
+	}
 	if tile && int64(len(feats)) > limit {
 		for i := range feats {
 			if !feats[i].speck {
-				feats[i].size = spread(feats[i].f.Geom)
+				feats[i].size = spread(feats[i].bound)
 			}
 		}
-		slices.SortStableFunc(feats, func(a, b shaped) int { return cmp.Compare(b.size, a.size) })
+		// A stable sort by size, as indexes: the features are too large to move around.
+		slices.SortFunc(order, func(a, b int) int {
+			return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
+		})
 	}
 	// Mirrors JavaScript's `!tile && (over || (thin && read past))`, where thin is null without a page.
 	switch {
@@ -256,12 +264,12 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	case thin && int64(len(rows)) > readLimit:
 		c.Exceeded = query.True
 	}
-	if int64(len(feats)) > limit {
-		feats = feats[:limit]
+	if int64(len(order)) > limit {
+		order = order[:limit]
 	}
-	c.Features = make([]query.Feature, len(feats))
-	for i := range feats {
-		c.Features[i] = feats[i].f
+	c.Features = make([]query.Feature, len(order))
+	for i, k := range order {
+		c.Features[i] = feats[k].f
 	}
 	return c, nil
 }
@@ -271,7 +279,8 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 // kept without reading its geometry.
 func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.Layer, p *plan.Plan, rows []int64, params query.Raw) error {
 	var known []bool
-	if spatial, err := params.Spatial(); err != nil || spatial == nil || !source.HasBBox {
+	spatial, err := params.Spatial()
+	if err != nil || spatial == nil || !source.HasBBox {
 		known = make([]bool, len(rows))
 	} else if rows, known, err = settle(ctx, source, spatial, rows); err != nil {
 		return err
@@ -286,7 +295,7 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 				read++
 			}
 		}
-		feats, err := pr.features(ctx, source, p, rows[:n], false, known[:n])
+		feats, err := pr.features(ctx, source, p, rows[:n], false, known[:n], spatial)
 		rows, known = rows[n:], known[n:]
 		out := make([]query.Feature, len(feats))
 		for i := range feats {
@@ -353,13 +362,15 @@ type cell struct {
 type shaped struct {
 	f     query.Feature
 	speck bool
+	bound orb.Bound
 	size  float64 // spread, when ranking a tile's features
 }
 
 // features reads the plan's columns (and geometry) at rows and builds the features, thinning
 // specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
-// known to meet the geometry filter, and its geometry is not read.
-func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool) ([]shaped, error) {
+// known to meet the geometry filter, and its geometry is not read; a row whose shape's bounds
+// meet the filter is marked known, so Run does not work them out again.
+func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool, spatial *query.Spatial) ([]shaped, error) {
 	if err := pr.warm(ctx, source, p, rows, known); err != nil {
 		return nil, err
 	}
@@ -406,7 +417,12 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 		for c := range p.Columns {
 			props[c] = values.Get(c, i)
 		}
-		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: known != nil && known[i]}, speck: shapes[i].Speck})
+		k := known != nil && known[i]
+		if !k && spatial != nil && g != nil {
+			pass, sure := spatial.Decide(shapes[i].Bound)
+			k = pass && sure
+		}
+		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: k}, speck: shapes[i].Speck, bound: shapes[i].Bound})
 	}
 	return out, nil
 }
@@ -417,13 +433,16 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool) error {
 	var geomRows []int64
 	if p.Geometry {
-		cached := p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id")
+		var cached *geom.Cached
+		if p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id") {
+			cached = pr.Shapes.At(source.ID(), p.Tolerance)
+		}
 		for i, r := range rows {
 			if known != nil && known[i] {
 				continue
 			}
-			if cached {
-				if _, _, found := pr.Shapes.Lookup(source.ID(), r+1, p.Tolerance); found {
+			if cached != nil {
+				if _, _, found := cached.Lookup(r + 1); found {
 					continue
 				}
 			}
@@ -476,6 +495,10 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 		return shapes, has, nil
 	}
 	idCol := slices.Index(p.Columns, "feature_id")
+	var cached *geom.Cached
+	if p.Tolerance > 0 && idCol >= 0 {
+		cached = pr.Shapes.At(source.ID(), p.Tolerance)
+	}
 	ids := make([]int64, len(rows))
 	var missing []int
 	for i := range rows {
@@ -486,8 +509,8 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 		if idCol >= 0 {
 			ids[i], _ = values.Get(idCol, i).(int64)
 		}
-		if p.Tolerance > 0 && idCol >= 0 {
-			if sh, ok, found := pr.Shapes.Lookup(source.ID(), ids[i], p.Tolerance); found {
+		if cached != nil {
+			if sh, ok, found := cached.Lookup(ids[i]); found {
 				shapes[i], has[i] = sh, ok
 				continue
 			}
@@ -519,8 +542,8 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 			for k := from; k < to; k++ {
 				i := missing[k]
 				var err error
-				if p.Tolerance > 0 && idCol >= 0 {
-					shapes[i], has[i], err = pr.Shapes.Make(source.ID(), ids[i], wkb.Bytes(0, k), p.Tolerance)
+				if cached != nil {
+					shapes[i], has[i], err = cached.Make(ids[i], wkb.Bytes(0, k))
 				} else {
 					shapes[i], has[i], err = geom.FromWKB(wkb.Bytes(0, k), p.Tolerance)
 				}
@@ -582,11 +605,9 @@ func firstPoint(g orb.Geometry) (orb.Point, bool) {
 	return orb.Point{}, false
 }
 
-// spread is width plus height of a geometry's bounds, to rank features by how much they cover.
-// Every ring counts: orb's Polygon.Bound looks at the outer ring only, and a simplified hole can
-// poke out of its outer ring.
-func spread(g orb.Geometry) float64 {
-	b := geom.Bounds(g)
+// spread is width plus height of a geometry's bounds (geom.Bounds, which counts every ring), to
+// rank features by how much they cover.
+func spread(b orb.Bound) float64 {
 	return (b.Max[0] - b.Min[0]) + (b.Max[1] - b.Min[1])
 }
 
