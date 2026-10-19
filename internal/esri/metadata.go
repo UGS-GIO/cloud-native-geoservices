@@ -1,5 +1,5 @@
-// Package esri builds the ArcGIS REST JSON documents Koop serves: service, layer and field
-// descriptions, from Koop's defaults and the provider's metadata.
+// Package esri builds the ArcGIS REST JSON documents: service, layer and field descriptions,
+// from defaults that follow ArcGIS Online and the provider's metadata.
 package esri
 
 import (
@@ -58,10 +58,10 @@ func defaults(raw []byte) jsonx.Obj {
 	return v.(jsonx.Obj)
 }
 
-// extent is the metadata extent as Koop normalizes it (spatialReference first).
+// extent is the metadata extent, in lon/lat.
 func extent(e *[4]float64) jsonx.Obj {
-	return jsonx.Obj{{K: "spatialReference", V: jsonx.Obj{{K: "wkid", V: 4326}}},
-		{K: "xmin", V: e[0]}, {K: "ymin", V: e[1]}, {K: "xmax", V: e[2]}, {K: "ymax", V: e[3]}}
+	return jsonx.Obj{{K: "xmin", V: e[0]}, {K: "ymin", V: e[1]}, {K: "xmax", V: e[2]}, {K: "ymax", V: e[3]},
+		{K: "spatialReference", V: jsonx.Obj{{K: "wkid", V: 4326}, {K: "latestWkid", V: 4326}}}}
 }
 
 func renderer(geometryType string) jsonx.Raw {
@@ -74,14 +74,8 @@ func renderer(geometryType string) jsonx.Raw {
 	return jsonx.Raw(`{"type":"simple","symbol":{"color":[247,150,70,161],"outline":{"color":[190,190,190,105],"width":0.5,"type":"esriSLS","style":"esriSLSSolid"},"size":7.5,"type":"esriSMS","style":"esriSMSCircle"}}`)
 }
 
-// truthy is how Koop decides whether a JSON override applies (lodash pickBy on the value).
-func truthy(raw json.RawMessage) bool {
-	switch string(raw) {
-	case "", "null", "false", "0", `""`:
-		return false
-	}
-	return true
-}
+// set reports a render's override present and not null.
+func set(raw json.RawMessage) bool { return len(raw) > 0 && string(raw) != "null" }
 
 // Layer is the layer description (`FeatureServer/{layer}`). layerID is the path segment.
 func Layer(m *Metadata, layerID string) jsonx.Obj {
@@ -98,10 +92,10 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 		o.Set("extent", extent(m.Extent))
 	}
 	drawing := jsonx.Obj{{K: "renderer", V: renderer(gt)}, {K: "labelingInfo", V: nil}}
-	if truthy(m.Renderer) {
+	if set(m.Renderer) {
 		drawing[0].V = jsonx.Raw(m.Renderer)
 	}
-	if truthy(m.LabelingInfo) {
+	if set(m.LabelingInfo) {
 		drawing[1].V = jsonx.Raw(m.LabelingInfo)
 	}
 	o.Set("drawingInfo", drawing)
@@ -118,10 +112,10 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	if m.TileMaxRecordCount != 0 {
 		o.Set("tileMaxRecordCount", m.TileMaxRecordCount)
 	}
-	if truthy(m.MinScale) {
+	if set(m.MinScale) {
 		o.Set("minScale", jsonx.Raw(m.MinScale))
 	}
-	if truthy(m.MaxScale) {
+	if set(m.MaxScale) {
 		o.Set("maxScale", jsonx.Raw(m.MaxScale))
 	}
 	return o
@@ -166,10 +160,10 @@ func Server(m *Metadata) jsonx.Obj {
 		o.Set("initialExtent", extent(m.Extent))
 	}
 	var minScale, maxScale any = 0, 0
-	if truthy(m.MinScale) {
+	if set(m.MinScale) {
 		minScale = jsonx.Raw(m.MinScale)
 	}
-	if truthy(m.MaxScale) {
+	if set(m.MaxScale) {
 		maxScale = jsonx.Raw(m.MaxScale)
 	}
 	o.Set("layers", []any{jsonx.Obj{

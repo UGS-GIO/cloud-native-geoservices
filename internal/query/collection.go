@@ -18,7 +18,7 @@ type Feature struct {
 	Known bool // the provider found from its bbox that it meets the geometry filter
 }
 
-// Collection is what the provider hands Koop.
+// Collection is what the provider hands a query.
 type Collection struct {
 	Meta           *esri.Metadata
 	Props          []string

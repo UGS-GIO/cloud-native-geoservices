@@ -159,7 +159,7 @@ func answer(c *Collection, p Params) (*Response, error) {
 		ids := &IDs{IDField: c.Meta.IDField, Exceeded: exceeded}
 		ids.IDs = make([]any, len(feats))
 		for i, ft := range feats {
-			ids.IDs[i] = jsonx.Undefined
+			ids.IDs[i] = nil
 			for _, kv := range ft.Attrs {
 				if kv.K == c.Meta.IDField {
 					ids.IDs[i] = kv.V

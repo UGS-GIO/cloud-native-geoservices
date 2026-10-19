@@ -131,7 +131,7 @@ type group struct {
 	accs   []accumulator
 }
 
-// statistics groups the features and computes outStatistics, as winnow's aggregate SQL did.
+// statistics groups the features and computes outStatistics.
 func (w *winnow) statistics(idx []int) (*Response, error) {
 	groupProps := make([]int, len(w.groupBy))
 	for i, g := range w.groupBy {

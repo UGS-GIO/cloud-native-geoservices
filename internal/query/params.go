@@ -1,6 +1,6 @@
-// Package query does what Koop's FeatureServer and winnow did with a provider's features:
-// validate the request, filter by where, ids and geometry, order, page, compute statistics,
-// project, and shape the Esri JSON, GeoJSON or PBF response.
+// Package query answers a query over a provider's features as ArcGIS Online does: validate the
+// request, filter by where, ids and geometry, order, page, compute statistics, project, and
+// shape the Esri JSON, GeoJSON or PBF response.
 package query
 
 import (
@@ -108,7 +108,7 @@ func Bad(msg string, details ...string) *Error {
 
 func isInt(f float64) bool { return f == math.Trunc(f) && !math.IsInf(f, 0) }
 
-// Validate checks the parameters Koop's query schema checks.
+// Validate rejects the parameter values ArcGIS Online rejects.
 func (p Params) Validate() error {
 	if v, ok := p["f"]; ok {
 		s, _ := v.(string)

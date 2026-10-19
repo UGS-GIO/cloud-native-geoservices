@@ -1,5 +1,5 @@
-// Package pbf encodes query results as the Esri FeatureCollection protocol buffer (f=pbf), field
-// for field as Koop's encoder writes it (Esri's FeatureCollection.proto, esriPBuffer).
+// Package pbf encodes query results as the Esri FeatureCollection protocol buffer (f=pbf):
+// Esri's FeatureCollection.proto, esriPBuffer.
 package pbf
 
 import (
@@ -190,12 +190,9 @@ func toInt32(f float64) int32 {
 	return int32(int64(math.Mod(math.Trunc(f), 1<<32)))
 }
 
-// value encodes one attribute the way Koop picks its Value field from the field type.
+// value encodes one attribute in the Value field its field type picks.
 func value(b []byte, fieldType string, v any) []byte {
 	if v == nil {
-		return b
-	}
-	if jsonx.IsUndefined(v) {
 		return b
 	}
 	switch fieldType {
