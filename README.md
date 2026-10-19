@@ -18,6 +18,12 @@ docker build -t geoparquet-featureserver .
 docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data geoparquet-featureserver
 ```
 
+Or install a release, a tagged version cut on every merge to main:
+
+```bash
+go install github.com/UGS-GIO/geoparquet-featureserver@latest
+```
+
 A STAC ItemCollection (`items.json`), local or over https:
 
 ```bash
