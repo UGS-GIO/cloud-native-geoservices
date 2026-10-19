@@ -178,6 +178,11 @@ func answer(c *Collection, p Params) (*Response, error) {
 		Exceeded:     c.Exceeded,
 	}
 	fs.Exceeded = fs.Exceeded || exceeded
+	if v, ok := p["quantizationParameters"]; ok && w.geometry {
+		if q, err := ParseQuantization(v); err == nil {
+			fs.Transform = q.Transform(w.outSR, c.Meta.Extent)
+		}
+	}
 	return &Response{JSON: fs, Features: fs}, nil
 }
 

@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/paulmach/orb"
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
@@ -17,25 +16,19 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
 )
 
-// Transform is the quantization applied to coordinates.
-type Transform struct {
-	XScale, YScale         float64
-	XTranslate, YTranslate float64
-}
-
-// TransformFor is the client's quantization, or the default for the output spatial reference.
-func TransformFor(q *query.Quantization, wkid int) Transform {
-	if q != nil {
-		return Transform{q.Scale, q.Scale, q.XTranslate, q.YTranslate}
+// transform is the response's quantization, or the default for its spatial reference.
+func transform(fs *query.FeatureSet) *geom.Transform {
+	if fs.Transform != nil {
+		return fs.Transform
 	}
 	scale := 1.0
-	switch wkid {
+	switch fs.SR.Wkid {
 	case 4326, 4269:
 		scale = 1e-9
 	case 102100, 3857, 102113, 3785:
 		scale = 0.0001
 	}
-	return Transform{scale, scale, 0, 0}
+	return &geom.Transform{XScale: scale, YScale: scale}
 }
 
 func message(b []byte, num protowire.Number, body []byte) []byte {
@@ -92,8 +85,9 @@ var fieldTypes = map[string]uint64{"esriFieldTypeSmallInteger": 0, "esriFieldTyp
 	"esriFieldTypeOID": 6, "esriFieldTypeGeometry": 7, "esriFieldTypeBlob": 8, "esriFieldTypeRaster": 9,
 	"esriFieldTypeGUID": 10, "esriFieldTypeGlobalID": 11, "esriFieldTypeXML": 12}
 
-// Features encodes a features result with transform t.
-func Features(fs *query.FeatureSet, t Transform) []byte {
+// Features encodes a features result.
+func Features(fs *query.FeatureSet) []byte {
+	t := transform(fs)
 	fields := slices.Clone(fs.Fields)
 	slices.SortStableFunc(fields, func(a, b esri.Field) int { return strings.Compare(a.Name, b.Name) })
 	types := make(map[string]string, len(fields))
@@ -121,7 +115,11 @@ func Features(fs *query.FeatureSet, t Transform) []byte {
 	}
 	scale := double(double(nil, 1, t.XScale), 2, t.YScale)
 	translate := double(double(nil, 1, t.XTranslate), 2, t.YTranslate)
-	b = message(b, 12, message(message(nil, 2, scale), 3, translate))
+	tb := message(message(nil, 2, scale), 3, translate)
+	if t.LowerLeft {
+		tb = varint(tb, 1, 1)
+	}
+	b = message(b, 12, tb)
 	for _, f := range fields {
 		fb := str(nil, 1, f.Name)
 		if ft, ok := fieldTypes[f.Type]; ok {
@@ -147,8 +145,14 @@ func Features(fs *query.FeatureSet, t Transform) []byte {
 			fb = message(fb, 1, vb)
 		}
 		if ft.Geom != nil {
-			gb = sc.geometry(gb[:0], ft.Geom, t)
+			var ok bool
+			gb, ok = sc.geometry(gb[:0], ft.Geom, t)
 			fb = message(fb, 2, gb)
+			if !ok {
+				x, y := t.Centroid(ft.Geom)
+				centroid := packed(nil, 2, []uint32{1}, length)
+				fb = message(fb, 4, packed(centroid, 3, []int64{x, y}, protowire.EncodeZigZag))
+			}
 		}
 		b = message(b, 15, fb)
 	}
@@ -217,67 +221,23 @@ func value(b []byte, fieldType string, v any) []byte {
 	return b
 }
 
-// round is JavaScript's Math.round: halves go up.
-func round(v float64) int64 {
-	r := math.Floor(v)
-	if v-r >= 0.5 {
-		r++
-	}
-	return int64(r)
-}
-
-// quantize turns a run of points into deltas, dropping points that land on the previous one.
-func quantize(pts []orb.Point, t Transform, coords []int64) ([]int64, int) {
-	n := 0
-	var px, py int64
-	for i, p := range pts {
-		x := round((p[0] - t.XTranslate) / t.XScale)
-		y := round((t.YTranslate - p[1]) / t.YScale)
-		if i == 0 {
-			coords = append(coords, x, y)
-		} else if x != px || y != py {
-			coords = append(coords, x-px, y-py)
-		} else {
-			continue
-		}
-		px, py = x, y
-		n++
-	}
-	return coords, n
-}
-
 // scratch holds one geometry's lengths and coordinates, reused from feature to feature.
 type scratch struct {
 	lengths []uint32
 	coords  []int64
 }
 
-func (s *scratch) geometry(b []byte, g *geom.Esri, t Transform) []byte {
-	lengths, coords := s.lengths[:0], s.coords[:0]
-	switch g.Kind {
-	case geom.EsriPoint:
-		coords = append(coords, round((g.X-t.XTranslate)/t.XScale), round((t.YTranslate-g.Y)/t.YScale))
-		lengths = append(lengths, 2)
-	case geom.EsriMultipoint:
-		var n int
-		coords, n = quantize(g.Parts[0], t, coords)
-		lengths = append(lengths, uint32(n))
-	default:
-		for _, part := range g.Parts {
-			before := len(coords)
-			var n int
-			coords, n = quantize(part, t, coords)
-			if n > 1 {
-				lengths = append(lengths, uint32(n))
-			} else {
-				coords = coords[:before]
-			}
-		}
+func (s *scratch) geometry(b []byte, g *geom.Esri, t *geom.Transform) ([]byte, bool) {
+	lengths, coords, ok := t.Quantized(g, s.lengths[:0], s.coords[:0])
+	if g.Kind == geom.EsriPoint {
+		lengths[0] = 2
 	}
 	s.lengths, s.coords = lengths, coords
-	b = packed(b, 2, lengths, func(l uint32) uint64 { return uint64(l) })
-	return packed(b, 3, coords, protowire.EncodeZigZag)
+	b = packed(b, 2, lengths, length)
+	return packed(b, 3, coords, protowire.EncodeZigZag), ok
 }
+
+func length(l uint32) uint64 { return uint64(l) }
 
 // packed writes xs as one packed varint field, or nothing when there are none.
 func packed[T any](b []byte, num protowire.Number, xs []T, enc func(T) uint64) []byte {

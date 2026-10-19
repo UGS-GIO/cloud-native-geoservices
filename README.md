@@ -140,7 +140,11 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 - `returnCountOnly`, `returnIdsOnly`, `returnExtentOnly`, `returnDistinctValues`.
 - `outStatistics` (`count`, `sum`, `min`, `max`, `avg`, `stddev`, `var`) with
   `groupByFieldsForStatistics`.
-- `f=json`, `f=geojson`, `f=pbf` (with `quantizationParameters`).
+- `f=json`, `f=geojson`, `f=pbf`. `quantizationParameters` apply to `f=json` and `f=pbf` as on
+  ArcGIS Online and are ignored by `f=geojson`: `view` mode steps by `tolerance` (default: the
+  extent over 10000) from the extent's corner (default: the layer extent), `edit` mode steps over
+  the spatial reference's XY domain, and a geometry that collapses to one point comes back empty
+  with its envelope center as `centroid`.
 
 Values are read as ArcGIS Online reads them: booleans and `f` in any case, and a boolean other
 than true or false, or a fractional or negative `resultRecordCount`, is a 400. A page of features

@@ -118,6 +118,21 @@ func TestGeometryPrecision(t *testing.T) {
 	}
 }
 
+func TestQuantization(t *testing.T) {
+	qp := "&quantizationParameters=" + url.QueryEscape(`{"originPosition":"upperLeft","tolerance":1,"extent":{"xmin":-101,"ymin":0,"xmax":0,"ymax":31}}`)
+	tests := []struct{ q, want string }{
+		{"objectIds=2" + qp, `"transform":{"originPosition":"upperLeft","scale":[1,1],"translate":[-101,31]}`},
+		{"objectIds=2" + qp, `{"x":1,"y":1}`},
+		{"objectIds=2&f=geojson" + qp, `"coordinates":[-100,30]`},
+		{"objectIds=2&returnGeometry=false" + qp, `"spatialReference":{"wkid":4326,"latestWkid":4326},"fields"`},
+	}
+	for _, tt := range tests {
+		if got := run(t, tt.q); !strings.Contains(got, tt.want) {
+			t.Errorf("%s answered %.300s", tt.q, got)
+		}
+	}
+}
+
 func TestRawSpatialQuotedRel(t *testing.T) {
 	s, err := Raw{"geometry": "-115,36,-108,43", "spatialRel": `"esriSpatialRelWithin"`}.Spatial()
 	if err != nil || s == nil || s.rel != "esriSpatialRelWithin" {

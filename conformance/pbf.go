@@ -459,6 +459,10 @@ func featureResult(b []byte, tree map[string]any) (float64, error) {
 				if feature["geometry"], err = geometry(f.bytes, gt, t); err != nil {
 					return 0, err
 				}
+			case 4:
+				if feature["centroid"], err = geometry(f.bytes, "esriGeometryPoint", t); err != nil {
+					return 0, err
+				}
 			}
 		}
 		features = append(features, feature)

@@ -85,7 +85,7 @@ func (d *differ) walk(path string, ref, ours any, geom bool) {
 				d.add(join(path, k), "missing", rv, nil)
 				continue
 			}
-			d.walk(join(path, k), rv, ov, geom || k == "geometry")
+			d.walk(join(path, k), rv, ov, geom || k == "geometry" || k == "centroid")
 		}
 		for k, ov := range o {
 			if _, ok := r[k]; !ok {

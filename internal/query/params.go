@@ -151,8 +151,8 @@ func (p Params) Validate() error {
 		}
 	}
 	if v, ok := p["quantizationParameters"]; ok {
-		if _, ok := ParseQuantization(v); !ok {
-			return Bad("'quantizationParameters' parameter is invalid", `"quantizationParameters" must be of type object`)
+		if _, err := ParseQuantization(v); err != nil {
+			return err
 		}
 	}
 	if v, ok := p["spatialRel"]; ok {
@@ -201,46 +201,61 @@ func supported(id int) bool {
 	return false
 }
 
-// Quantization is the PBF transform a client asks for.
+// Quantization is a client's quantizationParameters.
 type Quantization struct {
-	Scale                  float64
-	XTranslate, YTranslate float64
-	OriginPosition         string
-	HasOrigin              bool
+	Edit, LowerLeft bool
+	Tolerance       float64     // 0 when not given
+	Extent          *[4]float64 // nil when not given
+	ExtentSR        int         // the extent's wkid, 0 when not given
 }
 
-// ParseQuantization reads quantizationParameters.
-func ParseQuantization(v any) (Quantization, bool) {
+// ParseQuantization reads quantizationParameters, rejecting what AGOL rejects.
+func ParseQuantization(v any) (Quantization, error) {
+	var q Quantization
 	m, ok := v.(map[string]any)
 	if !ok {
-		return Quantization{}, false
+		return q, Bad("", "'quantizationParameters' parameter is invalid")
 	}
-	q := Quantization{Scale: 1}
-	if t, ok := m["tolerance"]; ok && t != nil {
-		f, ok := t.(float64)
-		if !ok {
-			return q, false
+	switch mode := m["mode"].(type) {
+	case string:
+		if mode != "view" && mode != "edit" {
+			return q, Bad("", "'mode' parameter is invalid")
 		}
-		q.Scale = f
+		q.Edit = mode == "edit"
+	case float64:
+		q.Edit = mode == 1
 	}
-	if o, ok := m["originPosition"]; ok {
-		s, ok := o.(string)
-		if !ok {
-			return q, false
+	if o, ok := m["originPosition"].(string); ok {
+		if o != "upperLeft" && o != "lowerLeft" {
+			return q, Bad("", "'originPosition' parameter is invalid")
 		}
-		q.OriginPosition, q.HasOrigin = s, true
+		q.LowerLeft = o == "lowerLeft"
+	}
+	switch t := m["tolerance"].(type) {
+	case nil:
+	case float64:
+		q.Tolerance = t
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err != nil {
+			return q, Bad("", "'quantizationTolerance' parameter is invalid")
+		}
+		q.Tolerance = f
+	default:
+		return q, Bad("", "'quantizationTolerance' parameter is invalid")
 	}
 	if e, ok := m["extent"]; ok && e != nil {
-		em, ok := e.(map[string]any)
-		if !ok {
-			return q, false
-		}
-		for _, k := range []string{"xmin", "ymin", "xmax", "ymax"} {
-			if _, ok := em[k].(float64); !ok {
-				return q, false
+		em, _ := e.(map[string]any)
+		var b [4]float64
+		for i, k := range []string{"xmin", "ymin", "xmax", "ymax"} {
+			f, ok := em[k].(float64)
+			if !ok {
+				return q, Bad("Cannot perform query. Invalid query parameters.", "'quantizationExtent' parameter is invalid")
 			}
+			b[i] = f
 		}
-		q.XTranslate, q.YTranslate = em["xmin"].(float64), em["ymax"].(float64)
+		q.Extent = &b
+		q.ExtentSR, _ = geom.Wkid(em["spatialReference"])
 	}
-	return q, true
+	return q, nil
 }
