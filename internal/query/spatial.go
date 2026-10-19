@@ -1,6 +1,8 @@
 package query
 
 import (
+	"math"
+
 	"github.com/paulmach/orb"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
@@ -8,12 +10,16 @@ import (
 )
 
 // Spatial is a request's geometry filter: the query geometry, prepared, and its spatialRel. With
-// a distance, an intersects-like relation is being within the distance of the geometry.
+// a distance, intersects is being within the distance of the geometry, and the other relations
+// test the geometry buffered by the distance, as AGOL does.
 type Spatial struct {
 	q    *geom.Prepared
 	rel  string
 	near *geom.Near
 }
+
+// maxBuffer is about the largest distance, in meters, AGOL buffers by.
+const maxBuffer = 1.98e7
 
 // newSpatial reads the filter; nil when the request has none.
 func newSpatial(geometry, inSR any, rel string, distance any, units string) (*Spatial, error) {
@@ -21,11 +27,40 @@ func newSpatial(geometry, inSR any, rel string, distance any, units string) (*Sp
 	if g == nil || err != nil {
 		return nil, err
 	}
-	s := &Spatial{q: geom.Prepare(g), rel: rel}
-	if d := js.Number(distance); d > 0 && rel != "esriSpatialRelContains" && rel != "esriSpatialRelWithin" {
-		s.near = geom.NewNear(g, geom.Meters(d, units))
+	d := js.Number(distance)
+	if math.IsNaN(d) || d < 0 || geom.Meters(d, units) > maxBuffer {
+		return nil, Bad("'distance' parameter is invalid")
 	}
+	if d > 0 && !bufferable(g) {
+		return nil, Bad("Unable to perform query. Please check your parameters.")
+	}
+	s := &Spatial{rel: rel}
+	if m := geom.Meters(d, units); d > 0 && (rel == "" || rel == "esriSpatialRelIntersects") {
+		s.near = geom.NewNear(g, m)
+	} else if d > 0 {
+		if g, err = geom.Buffer(g, m); err != nil {
+			return nil, Bad("Unable to perform query. Please check your parameters.")
+		}
+	}
+	s.q = geom.Prepare(g)
 	return s, nil
+}
+
+// bufferable reports g has a point and no line of one point, which AGOL needs to buffer it.
+func bufferable(g orb.Geometry) bool {
+	lines, _ := g.(orb.MultiLineString)
+	if l, ok := g.(orb.LineString); ok {
+		lines = orb.MultiLineString{l}
+	}
+	for _, l := range lines {
+		if len(l) < 2 {
+			return false
+		}
+	}
+	for range geom.Points(g) {
+		return true
+	}
+	return false
 }
 
 // Spatial is the request's geometry filter, read as Run reads it.

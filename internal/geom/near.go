@@ -1,9 +1,11 @@
 package geom
 
 import (
+	"errors"
 	"math"
 
 	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/encoding/wkb"
 	"github.com/paulmach/orb/project"
 	sf "github.com/peterstace/simplefeatures/geom"
 )
@@ -12,6 +14,9 @@ import (
 var unitMeters = map[string]float64{"esriSRUnit_Meter": 1, "esriSRUnit_Kilometer": 1000,
 	"esriSRUnit_Foot": 0.3048, "esriSRUnit_StatuteMile": 1609.344, "esriSRUnit_NauticalMile": 1852,
 	"esriSRUnit_USNauticalMile": 1853.248}
+
+// Unit reports an Esri unit name.
+func Unit(units string) bool { return unitMeters[units] != 0 }
 
 // Meters is a distance in units (meters when units is unknown or empty).
 func Meters(distance float64, units string) float64 {
@@ -74,4 +79,23 @@ func (n *Near) Match(g orb.Geometry) bool {
 	}
 	d, ok := sf.Distance(n.g, toSF(n.local(g)))
 	return ok && d <= n.meters
+}
+
+// Buffer is g grown by meters, in the projection Near measures in.
+func Buffer(g orb.Geometry, meters float64) (orb.Geometry, error) {
+	n := NewNear(g, meters)
+	b, err := sf.Buffer(n.g, meters)
+	if err != nil {
+		return nil, err
+	}
+	if b.IsEmpty() {
+		return nil, errors.New("empty buffer")
+	}
+	out, err := wkb.Unmarshal(b.AsBinary())
+	if err != nil {
+		return nil, err
+	}
+	return project.Geometry(out, func(p orb.Point) orb.Point {
+		return orb.Point{p[0]/n.kx + n.center[0], p[1]/n.ky + n.center[1]}
+	}), nil
 }
