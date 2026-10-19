@@ -98,8 +98,7 @@ with `resultType=tile` gets pages of up to `TILE_MAX_RECORDS` (default 8000), th
 `tileMaxRecordCount`, so a dense map tile answers in one request.
 
 When more features match than the page holds, the response sets `exceededTransferLimit` to
-`true`. The client then asks for the next page with `resultOffset`. A page of large geometries
-also ends early when its encoded size passes `MAX_RESPONSE_MB` (default 30).
+`true`. The client then asks for the next page with `resultOffset`.
 
 Counts, ids, extents and statistics are not capped at `MAX_RECORDS`. A count and an extent cover
 every match and ignore `resultOffset` and `resultRecordCount`. Ids and statistics are paged only

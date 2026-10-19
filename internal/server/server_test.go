@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,8 +28,8 @@ func fixture(t testing.TB) *httptest.Server {
 }
 
 // fixtureAt serves the testdata topics with their data files under base (a directory or URL), and
-// the content codings in compression, after tune changes the server.
-func fixtureAt(t testing.TB, base, compression string, tune ...func(*Server)) *httptest.Server {
+// the content codings in compression.
+func fixtureAt(t testing.TB, base, compression string) *httptest.Server {
 	items, err := os.ReadFile("../../testdata/items.json")
 	if err != nil {
 		t.Fatal(err)
@@ -41,9 +42,6 @@ func fixtureAt(t testing.TB, base, compression string, tune ...func(*Server)) *h
 		MaxScans: 1, ScanWait: time.Second, MaxWork: 2, MaxLight: 4, MaxInFlight: 64, WorkWait: time.Second}, 8<<20, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err := s.Compress(compression); err != nil {
 		t.Fatal(err)
-	}
-	for _, f := range tune {
-		f(s)
 	}
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -111,27 +109,19 @@ func TestQueries(t *testing.T) {
 	}
 }
 
-func TestMaxResponse(t *testing.T) {
-	root, _ := filepath.Abs("../../testdata")
-	ts := fixtureAt(t, root, "gzip", func(s *Server) { s.Limits.MaxResponse = 20 << 10 })
-	q := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?where=1=1&outFields=*&resultRecordCount=50&f="
-	for _, f := range []string{"json", "geojson"} {
-		req, _ := http.NewRequest(http.MethodGet, q+f, nil)
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-		var body map[string]any
-		json.Unmarshal(b, &body)
-		feats, _ := body["features"].([]any)
-		exceeded := body["exceededTransferLimit"]
-		if props, ok := body["properties"].(map[string]any); ok {
-			exceeded = props["exceededTransferLimit"]
-		}
-		if len(b) > 20<<10 || len(feats) == 0 || len(feats) >= 50 || exceeded != true {
-			t.Errorf("f=%s: %d bytes, %d features, exceeded %v", f, len(b), len(feats), exceeded)
+func TestStream(t *testing.T) {
+	defer func(n int) { streamOver = n }(streamOver)
+	streamOver = 4 << 10
+	ts := fixture(t)
+	q := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?where=1=1&"
+	for _, tt := range []struct {
+		query, coding string
+		chunked       bool
+	}{{"resultRecordCount=50", "", true}, {"resultRecordCount=50", "gzip", true}, {"returnCountOnly=true", "", false}} {
+		res, _ := get(t, q+tt.query, "Accept-Encoding", tt.coding)
+		chunked := slices.Contains(res.TransferEncoding, "chunked") && res.ContentLength == -1
+		if res.StatusCode != 200 || chunked != tt.chunked {
+			t.Errorf("%s %q: status %d, transfer %v, length %d", tt.query, tt.coding, res.StatusCode, res.TransferEncoding, res.ContentLength)
 		}
 	}
 }

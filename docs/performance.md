@@ -105,6 +105,9 @@ COMPRESSION=zstd,br,gzip
 
 The zstd window is limited to 8 MiB, which browsers can decode.
 
+A body over 16 MiB is sent with chunked transfer encoding and no `Content-Length`, because Cloud
+Run refuses a larger HTTP/1 body that has one.
+
 ## Admission and 503
 
 The server limits work at several points, so that a burst of requests cannot use all its memory.
