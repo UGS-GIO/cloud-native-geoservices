@@ -71,7 +71,7 @@ func TestRun(t *testing.T) {
 		{"where=1=1&outSR=2263", "error: Unsupported spatial reference: 2263"},
 		{"where=nope ===", `error: Invalid "where" parameter: nope ===`},
 		{"where=1=1&outFields=kind&returnDistinctValues=true&returnGeometry=false&resultRecordCount=1",
-			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","hasZ":false,"hasM":false,"spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"kind":"Lake"}}],"exceededTransferLimit":true,"geometryType":"esriGeometryPolygon"}`},
+			`{"objectIdFieldName":"feature_id","uniqueIdField":{"name":"feature_id","isSystemMaintained":true},"globalIdFieldName":"","geometryType":"esriGeometryPolygon","spatialReference":{"wkid":4326,"latestWkid":4326},"fields":[{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"exceededTransferLimit":true,"features":[{"attributes":{"kind":"Lake"}}]}`},
 	}
 	for _, tt := range tests {
 		if got := run(t, tt.q); got != tt.want {

@@ -160,9 +160,7 @@ func Run(c *Collection, p Params) (*Response, error) {
 		Features:     feats,
 		Exceeded:     c.Exceeded,
 	}
-	if exceeded {
-		fs.Exceeded = True
-	}
+	fs.Exceeded = fs.Exceeded || exceeded
 	return &Response{JSON: fs, Features: fs}, nil
 }
 

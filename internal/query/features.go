@@ -35,28 +35,30 @@ type FeatureSet struct {
 	SR           SpatialRef
 	Fields       []esri.Field
 	Features     []EsriFeature
-	Exceeded     Tri
+	Exceeded     bool
 	NoGeometry   bool // a statistics result
 }
 
-// AppendJSON implements jsonx.Appender, in Koop's key order.
+// AppendJSON implements jsonx.Appender, in AGOL's key order.
 func (s *FeatureSet) AppendJSON(buf []byte) []byte {
 	buf = append(buf, `{"objectIdFieldName":`...)
 	buf = jsonx.AppendString(buf, s.IDField)
 	buf = append(buf, `,"uniqueIdField":{"name":`...)
 	buf = jsonx.AppendString(buf, s.IDField)
-	buf = append(buf, `,"isSystemMaintained":true},"globalIdFieldName":"","hasZ":false,"hasM":false,"spatialReference":`...)
-	buf = s.SR.AppendJSON(buf)
-	buf = append(buf, `,"fields":`...)
-	buf = jsonx.AppendArray(buf, s.Fields, func(b []byte, f esri.Field) []byte { return jsonx.Append(b, f.Obj) })
-	buf = append(buf, `,"features":`...)
-	buf = jsonx.AppendArray(buf, s.Features, func(b []byte, f EsriFeature) []byte { return f.AppendJSON(b) })
-	buf = append(buf, `,"exceededTransferLimit":`...)
-	buf = s.Exceeded.AppendJSON(buf)
+	buf = append(buf, `,"isSystemMaintained":true},"globalIdFieldName":""`...)
 	if s.GeometryType != "" {
 		buf = append(buf, `,"geometryType":`...)
 		buf = jsonx.AppendString(buf, s.GeometryType)
 	}
+	buf = append(buf, `,"spatialReference":`...)
+	buf = s.SR.AppendJSON(buf)
+	buf = append(buf, `,"fields":`...)
+	buf = jsonx.AppendArray(buf, s.Fields, func(b []byte, f esri.Field) []byte { return jsonx.Append(b, f.Obj) })
+	if s.Exceeded {
+		buf = append(buf, `,"exceededTransferLimit":true`...)
+	}
+	buf = append(buf, `,"features":`...)
+	buf = jsonx.AppendArray(buf, s.Features, func(b []byte, f EsriFeature) []byte { return f.AppendJSON(b) })
 	return append(buf, '}')
 }
 

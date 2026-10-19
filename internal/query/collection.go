@@ -23,7 +23,7 @@ type Collection struct {
 	Meta           *esri.Metadata
 	Props          []string
 	Features       []Feature
-	Exceeded       Tri
+	Exceeded       bool
 	FiltersApplied map[string]bool // offset, limit, resultRecordCount, orderByFields
 	Count          *int64          // precalculated: the file's row count
 	Extent         jsonx.Obj       // precalculated: the file's extent
@@ -48,25 +48,4 @@ func (c *Collection) propIndex(name string) int {
 		}
 	}
 	return -1
-}
-
-// Tri is a JavaScript boolean that may also be null: the provider's exceededTransferLimit is null
-// when it did no paging and nothing overflowed, and Koop passes that through.
-type Tri int8
-
-const (
-	False Tri = iota
-	True
-	Null
-)
-
-// AppendJSON implements jsonx.Appender.
-func (t Tri) AppendJSON(buf []byte) []byte {
-	switch t {
-	case True:
-		return append(buf, "true"...)
-	case Null:
-		return append(buf, "null"...)
-	}
-	return append(buf, "false"...)
 }

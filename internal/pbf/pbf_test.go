@@ -60,11 +60,10 @@ func TestFeatures(t *testing.T) {
 			// The second point quantizes onto the first and is dropped; y counts down from the top.
 			Geom: &geom.Esri{Kind: geom.EsriPolyline, Parts: [][]orb.Point{{{0, 100}, {0.4, 100}, {10, 80}}, {{5, 5}, {5.2, 5}}}},
 		}},
-		Exceeded: query.Null,
 	}
 	result := fields(t, fields(t, fields(t, Features(fs, Transform{1, 1, 0, 100}))[2][0])[1][0])
 	if _, ok := result[9]; ok {
-		t.Error("a null exceededTransferLimit is not written")
+		t.Error("exceededTransferLimit is written only when true")
 	}
 	if names := result[13]; string(fields(t, names[0])[1][0]) != "feature_id" {
 		t.Error("fields are sorted by name")

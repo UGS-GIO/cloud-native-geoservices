@@ -116,8 +116,8 @@ func Features(fs *query.FeatureSet, t Transform) []byte {
 	if !fs.NoGeometry {
 		b = message(b, 8, varint(nil, 1, uint64(uint32(fs.SR.Wkid))))
 	}
-	if fs.Exceeded != query.Null {
-		b = boolean(b, 9, fs.Exceeded == query.True)
+	if fs.Exceeded {
+		b = boolean(b, 9, true)
 	}
 	scale := double(double(nil, 1, t.XScale), 2, t.YScale)
 	translate := double(double(nil, 1, t.XTranslate), 2, t.YTranslate)
