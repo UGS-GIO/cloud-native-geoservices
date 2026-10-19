@@ -100,7 +100,7 @@
   {"match": [
    "*: fields[*].length (value)",
    "*/layer: fields[*].nullable (value)"],
-   "reason": "String fields have length 128 and date fields 36, and every field is nullable false. Esri gives the real lengths (dates 8) and nullable true."},
+   "reason": "GeoParquet has no string lengths, so strings say 128; a GlobalID is a nullable string here."},
   {"match": [
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],

@@ -110,9 +110,8 @@
    "*/layer: globalIdField (value)"],
    "reason": "A GlobalID field cannot be declared, so it is a string field and globalIdFieldName is empty."},
   {"match": [
-   "*: fields[*].length (value)",
-   "*/layer: fields[*].nullable (value)"],
-   "reason": "String fields have length 128 and date fields 36, and every field is nullable false. Esri gives the real lengths (dates 8) and nullable true."},
+   "*: fields[*].length (value)"],
+   "reason": "GeoParquet has no string lengths, so strings say 128."},
   {"match": [
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],
