@@ -76,7 +76,8 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 - An integer `feature_id` column. It is the object id. Queries by `objectIds` need it.
 - Recommended: the bbox covering columns (`bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`),
   rows sorted spatially (for example Hilbert order), small row groups, and a page index. Without
-  the covering, a spatial filter reads the geometry of every row.
+  the covering, a spatial filter reads the geometry of every row. With the page index, a small
+  box reads only the bbox pages it meets, so small pages on those columns help.
 
 ## Environment
 

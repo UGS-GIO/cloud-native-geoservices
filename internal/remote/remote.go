@@ -49,20 +49,23 @@ type Store struct {
 	client *http.Client
 }
 
-// NewStore makes a page cache of budget bytes. Requests use a pool of HTTP/1.1 connections:
-// one multiplexed HTTP/2 connection lets a single stalled stream hold up the rest.
+// Transport is the pool of HTTP/1.1 connections stores read through: one multiplexed HTTP/2
+// connection lets a single stalled stream hold up the rest. Other clients of the same hosts
+// (the catalog) can share it, so a store's first read reuses their connection.
+var Transport = &http.Transport{
+	Proxy:                 http.ProxyFromEnvironment,
+	DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+	TLSClientConfig:       &tls.Config{NextProtos: []string{"http/1.1"}},
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: 10 * time.Second,
+	IdleConnTimeout:       90 * time.Second,
+	MaxIdleConnsPerHost:   32,
+	MaxConnsPerHost:       32,
+}
+
+// NewStore makes a page cache of budget bytes.
 func NewStore(budget int64) *Store {
-	t := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:       &tls.Config{NextProtos: []string{"http/1.1"}},
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-		MaxIdleConnsPerHost:   32,
-		MaxConnsPerHost:       32,
-	}
-	return &Store{cache: lru.New[spanKey, []byte](budget), client: &http.Client{Transport: t}}
+	return &Store{cache: lru.New[spanKey, []byte](budget), client: &http.Client{Transport: Transport}}
 }
 
 // File is one remote (or local) file at one version.

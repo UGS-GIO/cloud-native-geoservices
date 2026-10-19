@@ -1,8 +1,8 @@
 // Package pq reads a layer's GeoParquet over https, fetching only what a request needs.
 //
-// Row groups are pruned on the bbox covering columns' statistics; inside a row group, the small
-// bbox columns pick the matching rows, and where the file has a page index only the pages holding
-// them are fetched (small pages, ~100 rows, read best). Decoded values
+// Row groups are pruned on the bbox covering columns' statistics, and where the file has a page
+// index, so are the bbox columns' pages; the bbox values left pick the matching rows, and only
+// the pages holding them are fetched (small pages, ~100 rows, read best). Decoded values
 // stay in a cache per file, column and row group (or page), so a warm request skips zstd and
 // parquet decoding.
 package pq
@@ -14,6 +14,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/deprecated"
@@ -45,6 +46,7 @@ type Group struct {
 type leaf struct {
 	index int
 	kind  Kind
+	flat  bool // one value per row
 	conv  func(b *builder, v parquet.Value)
 }
 
@@ -65,6 +67,9 @@ type Layer struct {
 	Paged        bool // the geometry column has a page index
 	leaves       map[string]leaf
 	reader       *Reader
+
+	mu      sync.Mutex
+	indexes map[[2]int]*format.ColumnIndex // column indexes read so far, by row group and leaf
 }
 
 // ID names the file's version, for cache keys.
@@ -82,8 +87,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	if err != nil {
 		return nil, err
 	}
-	pf, err := parquet.OpenFile(f, f.Size, parquet.SkipPageIndex(true), parquet.SkipBloomFilters(true),
-		parquet.ReadBufferSize(256<<10))
+	// The footer's own magic is still checked; the header's would cost a request of its own.
+	pf, err := parquet.OpenFile(f, f.Size, parquet.SkipMagicBytes(true), parquet.SkipPageIndex(true),
+		parquet.SkipBloomFilters(true), parquet.ReadBufferSize(256<<10))
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +123,7 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		}
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		l.leaves[el.Name] = leaf{c.Index(), kind, conv}
+		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv}
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
@@ -176,17 +182,19 @@ func (l *Layer) stat(rg format.RowGroup, name string, isMax bool) float64 {
 	if isMax {
 		b = cm.Statistics.MaxValue
 	}
-	if b == nil {
-		return math.NaN()
-	}
+	return number(cm.Type, b)
+}
+
+// number is a plain-encoded statistic of a numeric column, NaN when absent.
+func number(t format.Type, b []byte) float64 {
 	switch {
-	case cm.Type == format.Double && len(b) == 8:
+	case t == format.Double && len(b) == 8:
 		return math.Float64frombits(binary.LittleEndian.Uint64(b))
-	case cm.Type == format.Float && len(b) == 4:
+	case t == format.Float && len(b) == 4:
 		return float64(math.Float32frombits(binary.LittleEndian.Uint32(b)))
-	case cm.Type == format.Int64 && len(b) == 8:
+	case t == format.Int64 && len(b) == 8:
 		return float64(int64(binary.LittleEndian.Uint64(b)))
-	case cm.Type == format.Int32 && len(b) == 4:
+	case t == format.Int32 && len(b) == 4:
 		return float64(int32(binary.LittleEndian.Uint32(b)))
 	}
 	return math.NaN()

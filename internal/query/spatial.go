@@ -55,6 +55,11 @@ func (s *Spatial) Decide(b orb.Bound) (pass, sure bool) {
 	return false, false
 }
 
+// Covers reports that every feature whose bbox lies in b passes for sure, as Decide would find.
+func (s *Spatial) Covers(b orb.Bound) bool {
+	return s.rel != "esriSpatialRelWithin" && s.q.Place(b) == geom.Inside
+}
+
 // Match is the spatialRel test of a feature's geometry.
 func (s *Spatial) Match(g orb.Geometry) bool {
 	if g == nil {

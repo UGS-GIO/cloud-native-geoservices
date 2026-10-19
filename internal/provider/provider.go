@@ -80,6 +80,12 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	if err != nil {
 		return "", err
 	}
+	// A small-scale query reads an overview next: open it now rather than after the data file.
+	for _, a := range item.Assets {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
+			go pr.Open(context.WithoutCancel(ctx), a.Href)
+		}
+	}
 	var layer *pq.Layer
 	var d *catalog.Drawing
 	g, gctx := errgroup.WithContext(ctx)
@@ -204,15 +210,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if thin {
 		sel.Page = &pq.Page{Offset: p.Page.Offset, Limit: readLimit}
 	}
-	// While a bbox scan runs, fetch the columns the read after it needs.
-	warmed := make(chan struct{})
-	if p.Box != nil && len(p.IDs) == 0 {
-		go func() { source.Warm(ctx, p.Columns, p.Box); close(warmed) }()
-	} else {
-		close(warmed)
-	}
 	rows, err := source.Select(ctx, sel)
-	<-warmed
 	if err != nil {
 		return nil, err
 	}
@@ -301,18 +299,37 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 	return err
 }
 
-// settle drops the rows whose bbox misses the filter and marks those whose bbox meets it.
+// settle drops the rows whose bbox misses the filter and marks those whose bbox meets it. A row
+// in pages whose bounds the filter covers is marked without reading its bbox.
 func settle(ctx context.Context, source *pq.Layer, spatial *query.Spatial, rows []int64) ([]int64, []bool, error) {
-	bbox, err := source.Read(ctx, pq.BBox, rows)
+	covered, err := source.Covered(ctx, rows, func(b [4]float64) bool {
+		return spatial.Covers(orb.Bound{Min: orb.Point{b[0], b[1]}, Max: orb.Point{b[2], b[3]}})
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	var rest []int64
+	for i, r := range rows {
+		if !covered[i] {
+			rest = append(rest, r)
+		}
+	}
+	bbox, err := source.Read(ctx, pq.BBox, rest)
 	if err != nil {
 		return nil, nil, err
 	}
 	keep, known := rows[:0:0], []bool{}
+	j := -1
 	for i, r := range rows {
+		if covered[i] {
+			keep, known = append(keep, r), append(known, true)
+			continue
+		}
+		j++
 		var b [4]float64
 		ok := true
 		for k := range b {
-			if b[k], ok = bbox.Get(k, i).(float64); !ok {
+			if b[k], ok = bbox.Get(k, j).(float64); !ok {
 				break
 			}
 		}
@@ -343,6 +360,9 @@ type shaped struct {
 // specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
 // known to meet the geometry filter, and its geometry is not read.
 func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool) ([]shaped, error) {
+	if err := pr.warm(ctx, source, p, rows, known); err != nil {
+		return nil, err
+	}
 	values, err := source.Read(ctx, p.Columns, rows)
 	if err != nil {
 		return nil, err
@@ -389,6 +409,40 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: known != nil && known[i]}, speck: shapes[i].Speck})
 	}
 	return out, nil
+}
+
+// warm fetches the attributes at rows and the geometry shapes will read, together: shapes needs
+// the attributes (feature_id) before it knows which geometry to read. A file whose feature_id is
+// the row number + 1 looks its shapes up by row here; elsewhere every unknown row's is fetched.
+func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool) error {
+	var geomRows []int64
+	if p.Geometry {
+		cached := p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id")
+		for i, r := range rows {
+			if known != nil && known[i] {
+				continue
+			}
+			if cached {
+				if _, _, found := pr.Shapes.Lookup(source.ID(), r+1, p.Tolerance); found {
+					continue
+				}
+			}
+			geomRows = append(geomRows, r)
+		}
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return source.Warm(gctx, p.Columns, rows) })
+	if len(geomRows) > 0 {
+		g.Go(func() error {
+			release, err := pr.admit(gctx, source.GeomBytes(geomRows))
+			if err != nil {
+				return err
+			}
+			defer release()
+			return source.Warm(gctx, []string{source.Geom}, geomRows)
+		})
+	}
+	return g.Wait()
 }
 
 // speckClass is row i's symbol class: its attributes but feature_id, which the JavaScript provider
