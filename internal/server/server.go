@@ -30,6 +30,7 @@ type Limits struct {
 	WorkWait     time.Duration // how long one waits for a slot before a 503
 	MaxLight     int           // light queries computing at once (cache hits are not counted)
 	MaxInFlight  int           // requests of any kind at once; past it, an immediate 503
+	MaxResponse  int64         // bytes of a features response before it ends the page early; 0 for no limit
 }
 
 // Server serves the FeatureServer API.
@@ -254,5 +255,11 @@ func (s *Server) answer(ctx context.Context, topic, render, layer string, isQuer
 	if err != nil {
 		return nil, err
 	}
-	return encodeQuery(p, res)
+	out, err := encodeQuery(p, res)
+	// Cloud Run refuses a response over 32 MiB: a larger page ends early, and the client pages on.
+	for err == nil && s.Limits.MaxResponse > 0 && int64(len(out.body)) > s.Limits.MaxResponse && res.Len() > 1 {
+		res.Cut(max(1, int(int64(res.Len())*s.Limits.MaxResponse/int64(len(out.body))*9/10)))
+		out, err = encodeQuery(p, res)
+	}
+	return out, err
 }

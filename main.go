@@ -153,6 +153,7 @@ func main() {
 		WorkWait:     time.Duration(envInt("WORK_WAIT_MS", 2000)) * time.Millisecond,
 		MaxLight:     int(envInt("MAX_LIGHT", int64(16*runtime.GOMAXPROCS(0)))),
 		MaxInFlight:  int(maxInFlight),
+		MaxResponse:  envInt("MAX_RESPONSE_MB", 30) << 20,
 	}, budget("RESPONSE_CACHE_MB", 256, 0.0625, limit), log)
 	if err := srv.Compress(env("COMPRESSION", "gzip")); err != nil {
 		log.Error("COMPRESSION", "err", err)

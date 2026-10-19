@@ -27,6 +27,33 @@ type Response struct {
 	geoJSON  bool      // JSON is already the f=geojson answer
 }
 
+// Len is how many features the response holds.
+func (res *Response) Len() int {
+	if res.Features != nil {
+		return len(res.Features.Features)
+	}
+	if o, ok := res.JSON.(jsonx.Obj); ok && res.geoJSON {
+		feats, _ := o.Get("features")
+		f, _ := feats.([]any)
+		return len(f)
+	}
+	return 0
+}
+
+// Cut keeps the first n features and flags the transfer limit exceeded, so the client pages on.
+func (res *Response) Cut(n int) {
+	if res.Features != nil {
+		res.Features.Features, res.Features.Exceeded = res.Features.Features[:n], true
+		return
+	}
+	if o, ok := res.JSON.(jsonx.Obj); ok && res.geoJSON {
+		feats, _ := o.Get("features")
+		o.Set("properties", jsonx.Obj{{K: "exceededTransferLimit", V: true}})
+		o.Set("features", feats.([]any)[:n])
+		res.JSON = o
+	}
+}
+
 // IDs is a returnIdsOnly result.
 type IDs struct {
 	IDField  string
