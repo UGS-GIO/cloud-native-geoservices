@@ -115,10 +115,9 @@
    "*/layer: supportedQueryFormats (value)"],
    "reason": "The layer says supportsCoordinatesQuantization false and supportedQueryFormats \"JSON,geojson,PBF\", though quantization works."},
   {"match": [
-   "*/layer: tileMaxRecordCount (value)",
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],
-   "reason": "The layer reports 2000 for every page size; tileMaxRecordCount is not TILE_MAX_RECORDS."},
+   "reason": "resultType=standard is not supported, so both standard page sizes are maxRecordCount."},
   {"match": [
    "*/layer: displayField (value)"],
    "reason": "displayField is the id field; Esri names a text field."},

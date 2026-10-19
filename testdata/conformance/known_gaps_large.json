@@ -97,12 +97,9 @@
  ],
  "known": [
   {"match": [
-   "*/features-where: features (length)",
    "*/features-where: features[] (extra)",
-   "*/features-where: exceededTransferLimit (missing)",
-   "*/distinct-two: features (length)",
-   "*/distinct-two: exceededTransferLimit (missing)"],
-   "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
+   "*/features-where: features[] (missing)"],
+   "reason": "Without orderByFields, AGOL returns the first maxRecordCount matches in its own index order; ours are the first by object id."},
   {"match": [
    "*/distinct-count: count (value)"],
    "reason": "returnCountOnly with returnDistinctValues counts rows, not distinct values."},
@@ -130,10 +127,9 @@
    "*/layer: supportedQueryFormats (value)"],
    "reason": "The layer says supportsCoordinatesQuantization false and supportedQueryFormats \"JSON,geojson,PBF\", though quantization works."},
   {"match": [
-   "*/layer: tileMaxRecordCount (value)",
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],
-   "reason": "The layer reports 2000 for every page size; tileMaxRecordCount is not TILE_MAX_RECORDS."},
+   "reason": "resultType=standard is not supported, so both standard page sizes are maxRecordCount."},
   {"match": [
    "*/layer: displayField (value)"],
    "reason": "displayField is the id field; Esri names a text field."},

@@ -158,5 +158,8 @@
 {"name": "geojson-page", "params": {"f": "geojson", "where": "1=1", "orderByFields": "{oid}", "resultRecordCount": "3", "outFields": "{oid}", "returnGeometry": "false"}},
 {"name": "geojson-outsr", "params": {"f": "geojson", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326"}},
 {"name": "pbf-extent", "params": {"f": "pbf", "where": "{where}", "returnExtentOnly": "true", "outSR": "4326"}},
-{"name": "pbf-count-extent", "params": {"f": "pbf", "where": "{where}", "returnExtentOnly": "true", "returnCountOnly": "true", "outSR": "102100"}}
+{"name": "pbf-count-extent", "params": {"f": "pbf", "where": "{where}", "returnExtentOnly": "true", "returnCountOnly": "true", "outSR": "102100"}},
+{"name": "page-where-default", "params": {"f": "json", "where": "{oid} > 0", "orderByFields": "{oid}", "outFields": "{oid}", "returnGeometry": "false"}},
+{"name": "page-where-over-max", "params": {"f": "json", "where": "{oid} > 0", "orderByFields": "{oid}", "outFields": "{oid}", "returnGeometry": "false", "resultRecordCount": "100000"}},
+{"name": "distinct-where-default", "params": {"f": "json", "where": "{oid} > 0", "orderByFields": "{oid}", "outFields": "{oid}", "returnDistinctValues": "true", "returnGeometry": "false"}}
 ]

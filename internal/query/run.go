@@ -363,6 +363,15 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if n, ok := p.Number("resultRecordCount"); ok && !applied["resultRecordCount"] && !applied["limit"] && isInt(n) && n != 0 {
 		w.limit = int(n) + 1
 	}
+	// As on AGOL, a page of features is at most maxRecordCount, with or without geometry.
+	features := !p.True("returnCountOnly") && !p.True("returnIdsOnly") && !p.True("returnExtentOnly") && w.aggregates == nil
+	maxRecords := c.Meta.MaxRecordCount
+	if s, _ := p.String("resultType"); s == "tile" {
+		maxRecords = c.Meta.TileMaxRecordCount
+	}
+	if features && maxRecords > 0 && !applied["limit"] && (w.limit == 0 || w.limit > maxRecords+1) {
+		w.limit = maxRecords + 1
+	}
 	if n, ok := p.Number("resultOffset"); ok && w.limit != 0 && !applied["offset"] && n > 0 {
 		w.offset = int(n)
 	}

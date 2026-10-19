@@ -26,10 +26,12 @@ type Metadata struct {
 	Fields         []pq.Column
 	Extent         *[4]float64 // lon/lat
 	MaxRecordCount int
-	Renderer       json.RawMessage
-	LabelingInfo   json.RawMessage
-	MinScale       json.RawMessage
-	MaxScale       json.RawMessage
+	// TileMaxRecordCount is the page of a resultType=tile query.
+	TileMaxRecordCount int
+	Renderer           json.RawMessage
+	LabelingInfo       json.RawMessage
+	MinScale           json.RawMessage
+	MaxScale           json.RawMessage
 }
 
 // GeometryType is the Esri name for the provider's geometry type.
@@ -109,6 +111,11 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	o.Set("objectIdField", m.IDField)
 	if m.MaxRecordCount != 0 {
 		o.Set("maxRecordCount", m.MaxRecordCount)
+		o.Set("standardMaxRecordCount", m.MaxRecordCount)
+		o.Set("standardMaxRecordCountNoGeometry", m.MaxRecordCount)
+	}
+	if m.TileMaxRecordCount != 0 {
+		o.Set("tileMaxRecordCount", m.TileMaxRecordCount)
 	}
 	if truthy(m.MinScale) {
 		o.Set("minScale", jsonx.Raw(m.MinScale))
