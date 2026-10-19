@@ -101,10 +101,16 @@ func FuzzRun(f *testing.F) {
 	})
 }
 
-func TestGeometryPrecisionIsBounded(t *testing.T) {
-	for _, q := range []string{"geometryPrecision=100000000", "geometryPrecision=-1"} {
-		if got := run(t, q); !strings.HasPrefix(got, "error: ") {
-			t.Errorf("%s answered %.80s", q, got)
+func TestGeometryPrecision(t *testing.T) {
+	tests := []struct{ q, want string }{
+		{"objectIds=2&geometryPrecision=0", `{"x":-100,"y":30}`},
+		{"objectIds=2&geometryPrecision=-3", `{"x":-100,"y":30}`},
+		{"objectIds=1&geometryPrecision=100000000", `[-112,40]`},
+		{"objectIds=1&geometryPrecision=abc", "error: "},
+	}
+	for _, tt := range tests {
+		if got := run(t, tt.q); !strings.Contains(got, tt.want) {
+			t.Errorf("%s answered %.200s", tt.q, got)
 		}
 	}
 }

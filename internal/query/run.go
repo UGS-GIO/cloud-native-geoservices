@@ -293,12 +293,9 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 	if b, ok := p["returnGeometry"].(bool); ok && !b {
 		w.geometry = false
 	}
-	if n, ok := p.Number("geometryPrecision"); ok && n != 0 {
-		// Koop's Number.prototype.toFixed throws outside 0..100; past it, formatting is unbounded work.
-		if n < 0 || n > 100 {
-			return nil, Bad("geometryPrecision must be between 0 and 100")
-		}
-		v := int(n)
+	// AGOL rounds a negative precision as 0, and past 20 digits keeps full precision.
+	if n, ok := p.Number("geometryPrecision"); ok && n <= 20 {
+		v := max(int(n), 0)
 		w.precision = &v
 	}
 	return w, nil
@@ -412,7 +409,7 @@ func (w *winnow) outPoint(p orb.Point) orb.Point {
 }
 
 func toFixed(f float64, d int) float64 {
-	v, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'f', max(d, 0), 64), 64)
+	v, _ := strconv.ParseFloat(strconv.FormatFloat(f, 'f', d, 64), 64)
 	return v
 }
 

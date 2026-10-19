@@ -132,6 +132,9 @@ func (p Params) Validate() error {
 			return Bad("Cannot perform query. Invalid query parameters.", "'"+k+"' parameter is invalid")
 		}
 	}
+	if v, ok := p["geometryPrecision"]; ok && typeOf(v) != "number" {
+		return Bad("", "'geometryPrecision' parameter is invalid")
+	}
 	if w, _ := p.String("where"); strings.TrimSpace(w) == "" && !p.has("objectIds", "geometry", "outStatistics", "time") {
 		return Bad("No where clause specified")
 	}

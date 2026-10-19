@@ -142,5 +142,10 @@
 {"name": "error-returngeometry-number", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "returnGeometry": "0"}},
 {"name": "error-count-fraction", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultRecordCount": "2.5"}},
 {"name": "error-count-negative", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultRecordCount": "-1"}},
-{"name": "error-offset-negative", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultOffset": "-1", "resultRecordCount": "2"}}
+{"name": "error-offset-negative", "params": {"f": "json", "where": "1=1", "outFields": "{oid}", "returnGeometry": "false", "resultOffset": "-1", "resultRecordCount": "2"}},
+{"name": "features-precision-0", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "0"}},
+{"name": "features-precision-negative", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "3857", "geometryPrecision": "-2"}},
+{"name": "features-precision-large", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "200"}},
+{"name": "features-precision-fraction", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "2.5"}},
+{"name": "error-precision-text", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "geometryPrecision": "abc"}}
 ]
