@@ -221,8 +221,8 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 
 // cached answers from the client's copy or the response cache, when either has tag.
 func (s *Server) cached(w http.ResponseWriter, r *http.Request, tag string) bool {
-	if notModified(r, tag) {
-		s.send(w, r, nil, tag)
+	if held := notModified(r, tag); held != "" {
+		s.send(w, r, nil, held)
 		return true
 	}
 	if hit, ok := s.responses.Get(tag); ok {

@@ -93,15 +93,18 @@ func etag(version string, r *http.Request) string {
 	return `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }
 
-// notModified compares If-None-Match, ignoring the suffix compressed ETags carry.
-func notModified(r *http.Request, tag string) bool {
+// notModified returns the If-None-Match tag that matches tag, ignoring the suffix compressed ETags
+// carry, so a 304 repeats the ETag of the client's representation; "" when none matches.
+func notModified(r *http.Request, tag string) string {
 	for _, t := range strings.Split(r.Header.Get("If-None-Match"), ",") {
-		t = baseTag(strings.TrimSpace(t))
-		if t == tag || t == "*" {
-			return true
+		t = strings.TrimSpace(t)
+		if b := baseTag(t); b == tag {
+			return t
+		} else if t == "*" {
+			return tag
 		}
 	}
-	return false
+	return ""
 }
 
 // send writes a successful response; nil out means 304 Not Modified.

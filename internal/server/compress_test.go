@@ -183,7 +183,7 @@ func TestCompressionHeaders(t *testing.T) {
 				t.Errorf("%q: body differs", tt.accept)
 			}
 			if res, _ := fetch(tt.accept, "If-None-Match", tag); res.StatusCode != http.StatusNotModified ||
-				res.Header.Get("Vary") != "Accept-Encoding" {
+				res.Header.Get("Vary") != "Accept-Encoding" || res.Header.Get("ETag") != tag {
 				t.Errorf("%q: If-None-Match %s gave %d", tt.accept, tag, res.StatusCode)
 			}
 		}
