@@ -3,6 +3,7 @@ package geom
 import (
 	"math"
 	"sync"
+	"unsafe"
 
 	"github.com/paulmach/orb"
 
@@ -72,31 +73,38 @@ func (c *Cached) Make(id int64, wkb []byte) (Shape, bool, error) {
 		return sh, ok, err
 	}
 	c.mu.Lock()
-	if ok {
+	_, dup := c.shapes[id]
+	n := noneBytes
+	if dup || c.none[id] {
+		n = 0
+	} else if ok {
 		c.shapes[id] = sh
+		n = shapeBytes + size(sh.G)
 	} else {
 		c.none[id] = true
 	}
 	c.mu.Unlock()
-	n := int64(8)
-	if ok {
-		n = size(sh.G)
-	}
 	c.s.steps.Grow(c.key, n)
 	return sh, ok, nil
 }
 
-// size is a rough heap size of a geometry.
+// Heap per map entry, measured: Go maps run between half and seven eighths full.
+const (
+	shapeBytes = int64(unsafe.Sizeof(int64(0))+unsafe.Sizeof(Shape{})) * 3 / 2
+	noneBytes  = int64(16)
+)
+
+// size is a rough heap size of a geometry: its boxed value and backing arrays.
 func size(g orb.Geometry) int64 {
 	switch g := g.(type) {
 	case orb.Point:
-		return 48
+		return 16
 	case orb.MultiPoint:
-		return 24 + 16*int64(len(g))
+		return 24 + 16*int64(cap(g))
 	case orb.LineString:
-		return 24 + 16*int64(len(g))
+		return 24 + 16*int64(cap(g))
 	case orb.Ring:
-		return 24 + 16*int64(len(g))
+		return 24 + 16*int64(cap(g))
 	case orb.MultiLineString:
 		return sizes(g)
 	case orb.Polygon:
@@ -104,13 +112,13 @@ func size(g orb.Geometry) int64 {
 	case orb.MultiPolygon:
 		return sizes(g)
 	}
-	return 16
+	return 0
 }
 
 func sizes[S ~[]T, T orb.Geometry](s S) int64 {
-	n := int64(24)
+	n := 24 + 24*int64(cap(s))
 	for _, m := range s {
-		n += size(m)
+		n += size(m) - 24 // members are slice headers in the array, not boxed
 	}
 	return n
 }

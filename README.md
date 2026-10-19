@@ -93,8 +93,8 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 | `STAC_COLLECTION_URL`, `LAYERS_CONFIG`, `LAYERS_DIR` | | layer source (see above) |
 | `CACHE_TTL` | 300 | seconds: layer list and file-version refresh, and `Cache-Control` |
 | `PUBLIC_URL` | request host | base of the URLs `/` lists |
-| `DECODED_CACHE_MB` | 512 or 12.5% of memory | decoded column values |
-| `SHAPE_CACHE_MB` | 256 or 6.25% | simplified geometry per zoom step |
+| `DECODED_CACHE_MB` | 512 or 10% of memory | decoded column values |
+| `SHAPE_CACHE_MB` | 512 or 15% | simplified geometry per zoom step |
 | `PAGE_CACHE_MB` | 128 or 3% | fetched bytes |
 | `RESPONSE_CACHE_MB` | 256 or 6.25% | encoded responses (kept compressed), by ETag |
 | `GEOMETRY_BUDGET_MB` | 512 or 12.5% | compressed geometry read at once; past it, 503 |

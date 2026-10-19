@@ -137,8 +137,8 @@ and the geometry budget default to the smaller of a fixed size and a fraction of
 | Setting | Fixed size | Fraction |
 |---|---|---|
 | `PAGE_CACHE_MB` | 128 MiB | 3% |
-| `DECODED_CACHE_MB` | 512 MiB | 12.5% |
-| `SHAPE_CACHE_MB` | 256 MiB | 6.25% |
+| `DECODED_CACHE_MB` | 512 MiB | 10% |
+| `SHAPE_CACHE_MB` | 512 MiB | 15% |
 | `RESPONSE_CACHE_MB` | 256 MiB | 6.25% |
 | `GEOMETRY_BUDGET_MB` | 512 MiB | 12.5% |
 | `MAX_IN_FLIGHT` | 2048 | 1 per MiB |
@@ -146,11 +146,13 @@ and the geometry budget default to the smaller of a fixed size and a fraction of
 The Go heap gets a soft limit at 80% of the memory limit. Without a cgroup limit, the fixed sizes
 apply.
 
-For example, with 1 GiB of memory the defaults are about 31 MiB of page cache, 128 MiB of decoded
-values, 64 MiB of shapes, 64 MiB of responses, a 128 MiB geometry budget and 1024 requests in
+For example, with 1 GiB of memory the defaults are about 31 MiB of page cache, 102 MiB of decoded
+values, 154 MiB of shapes, 64 MiB of responses, a 128 MiB geometry budget and 1024 requests in
 flight.
 
-More memory makes warm requests faster, because more of each layer stays decoded. Set the
+More memory makes warm requests faster, because more of each layer stays decoded. The shape
+cache gets the largest share: a miss there costs a decode and a simplify. With every zoom's shapes
+in the cache, a CPU answers about twice as many uncached tile requests. Set the
 variables to give one cache more room. Most of the caches fill only with what clients ask for.
 
 ## Put a CDN in front
