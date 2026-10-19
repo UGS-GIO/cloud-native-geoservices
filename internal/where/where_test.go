@@ -1,6 +1,7 @@
 package where
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,28 @@ func FuzzParse(f *testing.F) {
 		}
 		e.Match(row(1.5, "a", "b", int64(2), true, "1961", int64(0)))
 		e.Match(row(nil, nil, nil, nil, nil, nil, nil))
+	})
+}
+
+// FuzzMatch evaluates clauses over every field type the provider declares (decimals as Double,
+// INT96 as Date, booleans as Integer) with values of any type, which must never panic.
+func FuzzMatch(f *testing.F) {
+	for _, s := range []string{"acres > 1", "flag = 1", "timestamp > '2011-01-01'", "name LIKE 'U%'",
+		"count IN (1, '2') AND acres BETWEEN 0 AND 5", "name || 'x' = 'ax'", "acres * count > 1"} {
+		f.Add(s, []byte{1, 2, 3, 4, 5, 6, 7})
+	}
+	pool := []any{nil, int64(3), 2.5, math.NaN(), true, false, "Lake", "12", ""}
+	f.Fuzz(func(t *testing.T, s string, picks []byte) {
+		e, err := Parse(s, resolve)
+		if err != nil {
+			return
+		}
+		e.Match(func(i int) any {
+			if i < len(picks) {
+				return pool[int(picks[i])%len(pool)]
+			}
+			return nil
+		})
+		e.Err()
 	})
 }

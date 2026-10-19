@@ -7,6 +7,7 @@
 package where
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"regexp"
@@ -259,7 +260,7 @@ func (p *parser) predicate() (node, error) {
 		if err := p.unify(&l, &r, t.text); err != nil {
 			return l, err
 		}
-		return pred(cmpExpr{t.text, l.e, r.e})
+		return pred(cmpExpr{t.text, l.e, r.e, p.clause})
 	}
 	if p.keyword("IS") {
 		neg := p.keyword("NOT")
@@ -290,7 +291,7 @@ func (p *parser) predicate() (node, error) {
 		if err := p.unifyAll(&l, list, "IN"); err != nil {
 			return l, err
 		}
-		in := inExpr{v: l.e, neg: neg}
+		in := inExpr{v: l.e, neg: neg, clause: p.clause}
 		for _, v := range list {
 			in.list = append(in.list, v.e)
 		}
@@ -311,7 +312,7 @@ func (p *parser) predicate() (node, error) {
 		if l.k == kBool || l.k == kDate || pat.k != kNull && pat.k != kStr && !(pat.lit && pat.k == kNum) {
 			return l, errSyntax
 		}
-		return pred(&likeExpr{text(l), text(pat), esc, neg, map[string]*regexp.Regexp{}})
+		return pred(&likeExpr{text(l), text(pat), esc, neg, map[string]*regexp.Regexp{}, p.clause})
 	case p.keyword("BETWEEN"):
 		lo, err := p.sum()
 		if err != nil {
@@ -328,7 +329,7 @@ func (p *parser) predicate() (node, error) {
 		if err := p.unifyAll(&l, bounds, "BETWEEN"); err != nil {
 			return l, err
 		}
-		return pred(betweenExpr{l.e, bounds[0].e, bounds[1].e, neg})
+		return pred(betweenExpr{l.e, bounds[0].e, bounds[1].e, neg, p.clause})
 	}
 	if neg {
 		return l, errSyntax
@@ -359,7 +360,7 @@ func (p *parser) combine(op string, l, r node) (node, error) {
 		if l.k != kStr && l.k != kNull || r.k != kStr && r.k != kNull {
 			return l, errSyntax
 		}
-		return node{e: arithExpr{op: "+", l: l.e, r: r.e}, k: kStr}, nil
+		return node{e: arithExpr{op: "+", l: l.e, r: r.e, clause: p.clause}, k: kStr}, nil
 	}
 	if err := p.unify(&l, &r, op); err != nil {
 		return l, err
@@ -586,27 +587,31 @@ type arithExpr struct {
 	clause *Clause
 }
 type cmpExpr struct {
-	op   string
-	l, r expr
+	op     string
+	l, r   expr
+	clause *Clause
 }
 type isNullExpr struct {
 	v   expr
 	neg bool
 }
 type inExpr struct {
-	v    expr
-	list []expr
-	neg  bool
+	v      expr
+	list   []expr
+	neg    bool
+	clause *Clause
 }
 type likeExpr struct {
 	v, pattern expr
 	escape     string
 	neg        bool
 	cache      map[string]*regexp.Regexp
+	clause     *Clause
 }
 type betweenExpr struct {
 	v, lo, hi expr
 	neg       bool
+	clause    *Clause
 }
 type funcExpr struct {
 	upper bool
@@ -671,10 +676,17 @@ func (e arithExpr) eval(row Row) any {
 	if a == nil || b == nil {
 		return nil
 	}
-	if s, ok := a.(string); ok {
-		return s + b.(string)
+	s, ok1 := a.(string)
+	t, ok2 := b.(string)
+	if ok1 && ok2 {
+		return s + t
 	}
-	x, y := a.(float64), b.(float64)
+	x, ok1 := a.(float64)
+	y, ok2 := b.(float64)
+	if !ok1 || !ok2 {
+		e.clause.bad = true
+		return nil
+	}
 	switch e.op {
 	case "+":
 		return x + y
@@ -702,19 +714,18 @@ func (e notExpr) eval(row Row) any {
 
 func (e isNullExpr) eval(row Row) any { return (e.v.eval(row) == nil) != e.neg }
 
-// compare orders two non-null values of one type.
-func compare(a, b any) int {
-	if x, ok := a.(float64); ok {
-		y := b.(float64)
-		switch {
-		case x < y:
-			return -1
-		case x > y:
-			return 1
-		}
-		return 0
+// compare orders two non-null values, reporting false when they are not both numbers or both
+// strings.
+func compare(a, b any) (int, bool) {
+	switch x := a.(type) {
+	case float64:
+		y, ok := b.(float64)
+		return cmp.Compare(x, y), ok
+	case string:
+		y, ok := b.(string)
+		return CompareText(x, y), ok
 	}
-	return CompareText(a.(string), b.(string))
+	return 0, false
 }
 
 var wordSort = strings.NewReplacer("-", "", "'", "")
@@ -734,7 +745,11 @@ func (e cmpExpr) eval(row Row) any {
 	if a == nil || b == nil {
 		return nil
 	}
-	c := compare(a, b)
+	c, ok := compare(a, b)
+	if !ok {
+		e.clause.bad = true
+		return nil
+	}
 	switch e.op {
 	case "=", "==":
 		return c == 0
@@ -760,7 +775,10 @@ func (e inExpr) eval(row Row) any {
 		x := x.eval(row)
 		if x == nil {
 			out = nil // no match is unknown when the list has a null
-		} else if compare(v, x) == 0 {
+		} else if c, ok := compare(v, x); !ok {
+			e.clause.bad = true
+			return nil
+		} else if c == 0 {
 			return !e.neg
 		}
 	}
@@ -772,18 +790,23 @@ func (e *likeExpr) eval(row Row) any {
 	if v == nil || pat == nil {
 		return nil
 	}
-	p := pat.(string)
+	p, ok1 := pat.(string)
+	s, ok2 := v.(string)
+	if !ok1 || !ok2 {
+		e.clause.bad = true
+		return nil
+	}
 	re, ok := e.cache[p]
 	if !ok {
 		re = likeRegexp(p, e.escape)
 		e.cache[p] = re
 	}
-	return re.MatchString(v.(string)) != e.neg
+	return re.MatchString(s) != e.neg
 }
 
 func (e betweenExpr) eval(row Row) any {
 	v, lo, hi := e.v.eval(row), e.lo.eval(row), e.hi.eval(row)
-	in := logicExpr{true, lit{bound(lo, v)}, lit{bound(v, hi)}}.eval(row)
+	in := logicExpr{true, lit{e.bound(lo, v)}, lit{e.bound(v, hi)}}.eval(row)
 	if b, ok := in.(bool); ok {
 		return b != e.neg
 	}
@@ -791,11 +814,16 @@ func (e betweenExpr) eval(row Row) any {
 }
 
 // bound is a <= b, unknown when either is null.
-func bound(a, b any) any {
+func (e betweenExpr) bound(a, b any) any {
 	if a == nil || b == nil {
 		return nil
 	}
-	return compare(a, b) <= 0
+	c, ok := compare(a, b)
+	if !ok {
+		e.clause.bad = true
+		return nil
+	}
+	return c <= 0
 }
 
 func (e funcExpr) eval(row Row) any {
