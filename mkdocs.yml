@@ -1,0 +1,56 @@
+site_name: geoparquet-featureserver
+site_description: Serve GeoParquet files as ArcGIS FeatureServer layers.
+site_url: https://ugs-gio.github.io/geoparquet-featureserver/
+repo_url: https://github.com/UGS-GIO/geoparquet-featureserver
+repo_name: UGS-GIO/geoparquet-featureserver
+edit_uri: edit/main/docs/
+docs_dir: docs
+extra_css: [stylesheets/extra.css]
+exclude_docs: |
+  requirements.txt
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - scheme: slate
+      primary: indigo
+      toggle: { icon: material/weather-sunny, name: Light mode }
+  features:
+    - navigation.top
+    - navigation.sections
+    - toc.follow
+    - search.suggest
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guide:
+      - Layer sources: layer-sources.md
+      - Configuration: configuration.md
+      - Querying: querying.md
+  - Operations:
+      - Performance: performance.md
+      - Deployment: deployment.md
+  - Development:
+      - Conformance testing: conformance.md
+      - Contributing and releases: contributing.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.highlight: { anchor_linenums: true }
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
