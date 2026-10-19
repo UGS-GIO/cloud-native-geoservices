@@ -43,7 +43,8 @@ func TestStream(t *testing.T) {
 		{with("returnIdsOnly", "true"), true},
 		{with("spatialRel", "esriSpatialRelWithin"), true},
 		{with("returnExtentOnly", "true"), true},
-		{with("f", "geojson"), false},
+		{with("f", "geojson"), true},
+		{with("returnDistinctValues", "true"), false},
 		{map[string]string{"returnCountOnly": "true", "where": "acres > 1"}, false},
 	}
 	for _, tt := range tests {

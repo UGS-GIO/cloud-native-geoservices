@@ -206,7 +206,7 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	idsOnly, stats := isTrue(params["returnIdsOnly"]), params["outStatistics"] != ""
 	geometryExtent := extentOnly && !layer.BBox
 	p.Stream = (p.Box != nil || geometryExtent) && (countOnly || idsOnly || extentOnly) && !stats &&
-		!isTrue(params["returnDistinctValues"]) && params["f"] != "geojson"
+		!isTrue(params["returnDistinctValues"])
 
 	// Columns: the requested outFields plus anything where, ordering or statistics read.
 	outFields, ok := params["outFields"]

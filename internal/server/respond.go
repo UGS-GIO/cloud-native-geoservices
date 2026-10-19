@@ -61,6 +61,8 @@ func encodeQuery(p query.Params, res *query.Response) (*encoded, error) {
 	}
 	var body []byte
 	switch {
+	case p.True("returnExtentOnly") && res.Features != nil:
+		body = pbf.Features(res.Features, pbf.TransformFor(nil, res.Features.SR.Wkid))
 	case p.True("returnCountOnly"):
 		var n int64
 		if res.Count != nil {

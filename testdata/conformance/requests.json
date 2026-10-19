@@ -149,5 +149,14 @@
 {"name": "features-precision-fraction", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "2.5"}},
 {"name": "error-precision-text", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "geometryPrecision": "abc"}},
 {"name": "stats-default-names", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"Sum\",\"onStatisticField\":\"{lower:num}\"},{\"statisticType\":\"avg\",\"onStatisticField\":\"{num}\"},{\"statisticType\":\"min\",\"onStatisticField\":\"{str}\"},{\"statisticType\":\"MAX\",\"onStatisticField\":\"{int}\"},{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\"}]"}},
-{"name": "error-stats-name-space", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\",\"outStatisticFieldName\":\"n v\"}]"}}
+{"name": "error-stats-name-space", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\",\"outStatisticFieldName\":\"n v\"}]"}},
+{"name": "geojson-nogeom", "params": {"f": "geojson", "objectIds": "{ids}", "outFields": "{str},{oid}", "returnGeometry": "false"}},
+{"name": "geojson-ids", "params": {"f": "geojson", "where": "{where}", "returnIdsOnly": "true"}},
+{"name": "geojson-extent", "params": {"f": "geojson", "where": "{where}", "returnExtentOnly": "true", "outSR": "3857"}},
+{"name": "geojson-count-extent", "params": {"f": "geojson", "where": "{where}", "returnExtentOnly": "true", "returnCountOnly": "true"}},
+{"name": "geojson-stats", "params": {"f": "geojson", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\",\"outStatisticFieldName\":\"n\"}]"}},
+{"name": "geojson-page", "params": {"f": "geojson", "where": "1=1", "orderByFields": "{oid}", "resultRecordCount": "3", "outFields": "{oid}", "returnGeometry": "false"}},
+{"name": "geojson-outsr", "params": {"f": "geojson", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326"}},
+{"name": "pbf-extent", "params": {"f": "pbf", "where": "{where}", "returnExtentOnly": "true", "outSR": "4326"}},
+{"name": "pbf-count-extent", "params": {"f": "pbf", "where": "{where}", "returnExtentOnly": "true", "returnCountOnly": "true", "outSR": "102100"}}
 ]

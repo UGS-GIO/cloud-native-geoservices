@@ -56,8 +56,11 @@ func Normalize(req Request, status int, body []byte, pbf bool, idField string) (
 			sortRows(features)
 		}
 	}
-	if ids, ok := a.Tree["objectIds"].([]any); ok {
-		slices.SortFunc(ids, compareAny)
+	props, _ := a.Tree["properties"].(map[string]any)
+	for _, m := range []map[string]any{a.Tree, props} {
+		if ids, ok := m["objectIds"].([]any); ok {
+			slices.SortFunc(ids, compareAny)
+		}
 	}
 	return a, nil
 }
@@ -68,7 +71,8 @@ func renameID(v any, id string, inAttributes bool) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, child := range x {
-			attrs := inAttributes || k == "attributes" || k == "properties"
+			// A FeatureCollection's own properties (ids, count) are not attributes.
+			attrs := inAttributes || k == "attributes" || k == "properties" && x["type"] != "FeatureCollection"
 			out[strings.ReplaceAll(k, id, "feature_id")] = renameID(child, id, attrs)
 		}
 		return out
