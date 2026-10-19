@@ -90,12 +90,34 @@ func GroupField(m *Metadata, name string) (Field, bool) {
 	return Field{}, false
 }
 
-// StatisticField is an outStatistics result field.
-func StatisticField(name string, date bool) Field {
+// StatisticField is an outStatistics result field: a count is an integer, a min or max has the
+// type of its source field, and the rest are doubles.
+func StatisticField(name, kind string, m *Metadata, source string) Field {
 	t, sql := "esriFieldTypeDouble", "sqlTypeFloat"
-	if date {
-		t, sql = "esriFieldTypeDate", "sqlTypeOther"
+	length := 0
+	switch {
+	case kind == "COUNT":
+		t, sql = "esriFieldTypeInteger", "sqlTypeInteger"
+	case kind == "MIN" || kind == "MAX":
+		for _, c := range m.Fields {
+			if c.Name != source {
+				continue
+			}
+			switch FieldType(c.Type) {
+			case "esriFieldTypeInteger":
+				t, sql = "esriFieldTypeInteger", "sqlTypeInteger"
+			case "esriFieldTypeDouble":
+				sql = "sqlTypeDouble"
+			case "esriFieldTypeDate":
+				t, sql, length = "esriFieldTypeDate", "sqlTypeDate", 8
+			default:
+				t, sql, length = "esriFieldTypeString", "sqlTypeNVarchar", 128
+			}
+		}
 	}
-	return Field{name, t, jsonx.Obj{{K: "name", V: name}, {K: "type", V: t}, {K: "sqlType", V: sql},
-		{K: "alias", V: name}, {K: "domain", V: nil}, {K: "defaultValue", V: nil}}}
+	o := jsonx.Obj{{K: "name", V: name}, {K: "type", V: t}, {K: "alias", V: name}, {K: "sqlType", V: sql}}
+	if length != 0 {
+		o = append(o, jsonx.KV{K: "length", V: length})
+	}
+	return Field{name, t, append(o, jsonx.KV{K: "domain", V: nil}, jsonx.KV{K: "defaultValue", V: nil})}
 }

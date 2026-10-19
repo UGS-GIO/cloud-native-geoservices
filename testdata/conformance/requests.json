@@ -147,5 +147,7 @@
 {"name": "features-precision-negative", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "3857", "geometryPrecision": "-2"}},
 {"name": "features-precision-large", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "200"}},
 {"name": "features-precision-fraction", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "outSR": "4326", "geometryPrecision": "2.5"}},
-{"name": "error-precision-text", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "geometryPrecision": "abc"}}
+{"name": "error-precision-text", "params": {"f": "json", "objectIds": "{ids}", "outFields": "{oid}", "geometryPrecision": "abc"}},
+{"name": "stats-default-names", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"Sum\",\"onStatisticField\":\"{lower:num}\"},{\"statisticType\":\"avg\",\"onStatisticField\":\"{num}\"},{\"statisticType\":\"min\",\"onStatisticField\":\"{str}\"},{\"statisticType\":\"MAX\",\"onStatisticField\":\"{int}\"},{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\"}]"}},
+{"name": "error-stats-name-space", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{str}\",\"outStatisticFieldName\":\"n v\"}]"}}
 ]

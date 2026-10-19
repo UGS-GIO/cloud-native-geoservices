@@ -104,21 +104,6 @@
    "*/distinct-two: exceededTransferLimit (missing)"],
    "reason": "With returnGeometry=false and no resultRecordCount, a where query or returnDistinctValues returns every match instead of maxRecordCount rows with exceededTransferLimit."},
   {"match": [
-   "*/stats*: fields[*].type (value)",
-   "*/stats*: fields[*].length (missing)"],
-   "reason": "Statistics fields are not typed by their source: count is a double (Esri: integer), min and max of an integer field are doubles, and string and date results have no length."},
-  {"match": [
-   "*/stats-default-name: features[].attributes.* (*)",
-   "*/stats-default-name: fields[*] (*)"],
-   "reason": "The default outStatisticFieldName is count_feature_id; Esri's is COUNT_OBJECTID."},
-  {"match": [
-   "*/stats*: displayFieldName (extra)",
-   "*/stats*: geometryType (missing)",
-   "*/stats*: objectIdFieldName (missing)",
-   "*/stats*: spatialReference (missing)",
-   "*/stats*: uniqueIdField (missing)"],
-   "reason": "Statistics answers carry Koop's displayFieldName and leave out objectIdFieldName, uniqueIdField, geometryType and spatialReference."},
-  {"match": [
    "*/distinct-count: count (value)"],
    "reason": "returnCountOnly with returnDistinctValues counts rows, not distinct values."},
   {"match": [
