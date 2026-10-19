@@ -96,8 +96,9 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 | `DECODED_CACHE_MB` | 512 or 12.5% of memory | decoded column values |
 | `SHAPE_CACHE_MB` | 256 or 6.25% | simplified geometry per zoom step |
 | `PAGE_CACHE_MB` | 128 or 3% | fetched bytes |
-| `RESPONSE_CACHE_MB` | 256 or 6.25% | encoded responses (kept gzipped), by ETag |
+| `RESPONSE_CACHE_MB` | 256 or 6.25% | encoded responses (kept compressed), by ETag |
 | `GEOMETRY_BUDGET_MB` | 512 or 12.5% | compressed geometry read at once; past it, 503 |
+| `COMPRESSION` | gzip | content codings offered, most preferred first: `gzip`, `br`, `zstd` |
 | `MAX_RECORDS` / `TILE_MAX_RECORDS` | 2000 / 8000 | page size; tile page size |
 | `MAX_GEOMETRY_ROWS` | 50000 | geometries one request reads before `where` |
 | `MAX_WHERE_LENGTH` | 4096 | characters |
@@ -136,6 +137,9 @@ Cache sizes default to the smaller of the listed size and a fraction of the cont
 
 Responses carry an ETag (data version + normalized query) and `Cache-Control`, so a CDN in front
 can serve repeated tiles.
+
+Responses of 1 KB or more use the `COMPRESSION` coding that `Accept-Encoding` ranks highest (ties
+go to the first listed), else gzip, else none, and each coding has its own ETag.
 
 ## Known gaps
 

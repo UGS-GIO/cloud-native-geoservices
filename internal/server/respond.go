@@ -25,14 +25,15 @@ const jsonType = "application/json; charset=utf-8"
 
 // encoded is a response body ready to send, and what the encoded-response cache holds.
 type encoded struct {
-	body        []byte // nil when only the gzipped form is kept
-	gz          []byte
+	body        []byte // nil when only the compressed form is kept
+	packed      []byte
+	coding      *coding // of packed
 	contentType string
 	pbf         bool
 }
 
 // size is what the response cache counts for it.
-func (e *encoded) size() int64 { return int64(len(e.body) + len(e.gz) + 256) }
+func (e *encoded) size() int64 { return int64(len(e.body) + len(e.packed) + 256) }
 
 var callbackChars = regexp.MustCompile(`[^\w\d\.\(\)\[\]]`)
 
@@ -92,15 +93,18 @@ func etag(version string, r *http.Request) string {
 	return `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
 }
 
-// notModified compares If-None-Match, ignoring the suffix the gzip layer adds to compressed ETags.
-func notModified(r *http.Request, tag string) bool {
+// notModified returns the If-None-Match tag that matches tag, ignoring the suffix compressed ETags
+// carry, so a 304 repeats the ETag of the client's representation; "" when none matches.
+func notModified(r *http.Request, tag string) string {
 	for _, t := range strings.Split(r.Header.Get("If-None-Match"), ",") {
-		t = strings.TrimSpace(strings.Replace(t, `-gzip"`, `"`, 1))
-		if t == tag || t == "*" {
-			return true
+		t = strings.TrimSpace(t)
+		if b := baseTag(t); b == tag {
+			return t
+		} else if t == "*" {
+			return tag
 		}
 	}
-	return false
+	return ""
 }
 
 // send writes a successful response; nil out means 304 Not Modified.
@@ -112,6 +116,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, out *encoded, tag 
 	if tag != "" {
 		h.Set("ETag", tag)
 	}
+	h.Set("Vary", "Accept-Encoding")
 	if out == nil {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -120,22 +125,11 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, out *encoded, tag 
 	if out.pbf {
 		h.Set("Content-Disposition", "inline;filename=results.pbf")
 	}
-	h.Set("Vary", "Accept-Encoding")
-	body, gzipped := out.body, false
-	if acceptsGzip(r) {
-		switch {
-		case out.gz != nil:
-			body, gzipped = out.gz, true
-		case len(out.body) >= gzipMin:
-			body, gzipped = compress(out.body), true
-		}
-	} else if out.gz != nil {
-		body = decompress(out.gz)
-	}
-	if gzipped {
-		h.Set("Content-Encoding", "gzip")
+	body, c := s.represent(out, negotiate(r.Header.Get("Accept-Encoding"), s.codings), tag)
+	if c != nil {
+		h.Set("Content-Encoding", c.name)
 		if tag != "" {
-			h.Set("ETag", gzipTag(tag))
+			h.Set("ETag", codedTag(tag, c))
 		}
 	}
 	h.Set("Content-Length", strconv.Itoa(len(body)))
