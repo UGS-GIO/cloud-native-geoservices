@@ -19,7 +19,6 @@
    "*/layer: editingInfo (missing)",
    "*/layer: hasMetadata (missing)",
    "*/layer: cacheMaxAge (missing)",
-   "*/layer: currentVersion (value)",
    "*/layer: indexes (length)",
    "*/layer: templates (length)",
    "*/layer: htmlPopupType (value)",
@@ -67,15 +66,8 @@
    "*/layer: enableNullGeometry (missing)",
    "*/layer: maxIdsCount (missing)",
    "*/layer: fields[*].editable (value)",
-   "*/layer: fields[*].precision (missing)",
-   "*/layer: dateFieldsTimeReference.timeZoneIANA (missing)"],
+   "*/layer: fields[*].precision (missing)"],
    "reason": "Capabilities this server does not implement (editing, curves, attachments, analytics, export, sync, collation). It reports them as unsupported or leaves them out."},
-  {"match": [
-   "*/layer: hasLabels (extra)",
-   "*/layer: ownershipBasedAccessControlForFeatures (extra)",
-   "*/layer: supportedPbfFeatureEncodings (extra)",
-   "*/layer: timeInfo (extra)"],
-   "reason": "Koop's layer defaults; harmless."},
   {"match": [
    "*/layer: extent (value)",
    "*/layer: extent.*min (value)",
@@ -111,9 +103,8 @@
    "*/pbf: fields (order)"],
    "reason": "f=pbf lists fields in alphabetical order, not schema order."},
   {"match": [
-   "*: *spatialReference.latestWkid (missing)",
-   "*/layer: spatialReference (missing)"],
-   "reason": "f=pbf leaves out latestWkid, and the layer has no spatialReference."},
+   "*: *spatialReference.latestWkid (missing)"],
+   "reason": "f=pbf leaves out latestWkid."},
   {"match": [
    "*: globalIdFieldName (*)",
    "*/layer: globalIdField (value)"],
@@ -123,16 +114,12 @@
    "*/layer: fields[*].nullable (value)"],
    "reason": "String fields have length 128 and date fields 36, and every field is nullable false. Esri gives the real lengths (dates 8) and nullable true."},
   {"match": [
-   "*/layer: supportsCoordinatesQuantization (value)",
-   "*/layer: supportedQueryFormats (value)"],
-   "reason": "The layer says supportsCoordinatesQuantization false and supportedQueryFormats \"JSON,geojson,PBF\", though quantization works."},
-  {"match": [
    "*/layer: standardMaxRecordCount (value)",
    "*/layer: standardMaxRecordCountNoGeometry (value)"],
    "reason": "resultType=standard is not supported, so both standard page sizes are maxRecordCount."},
   {"match": [
    "*/layer: displayField (value)"],
-   "reason": "displayField is the id field; Esri names a text field."},
+   "reason": "displayField is the first text field with \"name\" in it, else the first text field; these publishers chose another."},
   {"match": [
    "*/layer: supportedSpatialRelationships (length)"],
    "reason": "Only four spatialRel values are supported (README)."},

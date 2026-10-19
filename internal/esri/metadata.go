@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
@@ -89,7 +90,7 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	if id, err := strconv.Atoi(layerID); err == nil && id != 0 {
 		o.Set("id", id)
 	}
-	o.Set("displayField", m.IDField)
+	o.Set("displayField", displayField(m))
 	o.Set("uniqueIdField", jsonx.Obj{{K: "name", V: m.IDField}, {K: "isSystemMaintained", V: true}})
 	gt := GeometryType(m.GeometryType)
 	o.Set("geometryType", gt)
@@ -126,6 +127,27 @@ func Layer(m *Metadata, layerID string) jsonx.Obj {
 	return o
 }
 
+// displayField is the first text field whose name has "name" in it, else the first text field,
+// as ArcGIS Pro picks one when it publishes a layer.
+func displayField(m *Metadata) string {
+	first := ""
+	for _, c := range m.Fields {
+		if FieldType(c.Type) != "esriFieldTypeString" || c.Name == m.IDField {
+			continue
+		}
+		if strings.Contains(strings.ToLower(c.Name), "name") {
+			return c.Name
+		}
+		if first == "" {
+			first = c.Name
+		}
+	}
+	if first == "" {
+		return m.IDField
+	}
+	return first
+}
+
 // Layers is the `FeatureServer/layers` document.
 func Layers(m *Metadata) jsonx.Obj {
 	return jsonx.Obj{{K: "layers", V: []any{Layer(m, "0")}}, {K: "tables", V: []any{}}}
@@ -151,9 +173,9 @@ func Server(m *Metadata) jsonx.Obj {
 		maxScale = jsonx.Raw(m.MaxScale)
 	}
 	o.Set("layers", []any{jsonx.Obj{
-		{K: "id", V: 0}, {K: "name", V: m.Name}, {K: "type", V: "Feature Layer"},
-		{K: "parentLayerId", V: -1}, {K: "defaultVisibility", V: true}, {K: "subLayerIds", V: nil},
-		{K: "minScale", V: minScale}, {K: "maxScale", V: maxScale}, {K: "geometryType", V: GeometryType(m.GeometryType)},
+		{K: "id", V: 0}, {K: "name", V: m.Name}, {K: "parentLayerId", V: -1}, {K: "defaultVisibility", V: true},
+		{K: "subLayerIds", V: nil}, {K: "minScale", V: minScale}, {K: "maxScale", V: maxScale},
+		{K: "type", V: "Feature Layer"}, {K: "geometryType", V: GeometryType(m.GeometryType)},
 	}})
 	return o
 }
