@@ -19,6 +19,10 @@
 {"name": "count-str-ne-number", "params": {"f": "json", "where": "{nullstr} <> 1", "returnCountOnly": "true"}},
 {"name": "error-str-in-number", "params": {"f": "json", "where": "{str} IN (1)", "returnCountOnly": "true"}},
 {"name": "count-true", "params": {"f": "json", "where": "TRUE", "returnCountOnly": "true"}},
+{"name": "count-arith", "params": {"f": "json", "where": "{arith}", "returnCountOnly": "true"}},
+{"name": "count-int-divide", "params": {"f": "json", "where": "{int} / 2 * 2 = {int}", "returnCountOnly": "true"}},
+{"name": "count-concat", "params": {"f": "json", "where": "{str} || 'x' = {str} + 'x'", "returnCountOnly": "true"}},
+{"name": "error-str-plus-number", "params": {"f": "json", "where": "{str} + 1 > 5", "returnCountOnly": "true"}},
 {"name": "count-in", "params": {"f": "json", "where": "{oid} IN ({ids})", "returnCountOnly": "true"}},
 {"name": "count-ids-where", "params": {"f": "json", "objectIds": "{ids}", "where": "{where}", "returnCountOnly": "true"}},
 {"name": "count-envelope", "params": {"f": "json", "returnCountOnly": "true", "geometry": "{env}", "geometryType": "esriGeometryEnvelope", "inSR": "4326"}},
@@ -101,5 +105,6 @@
 {"name": "error-stats-field", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"sum\",\"onStatisticField\":\"nosuchfield\",\"outStatisticFieldName\":\"s\"}]"}},
 {"name": "error-stats-group", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"count\",\"onStatisticField\":\"{oid}\",\"outStatisticFieldName\":\"n\"}]", "groupByFieldsForStatistics": "nosuchfield"}},
 {"name": "error-stats-type", "params": {"f": "json", "where": "1=1", "outStatistics": "[{\"statisticType\":\"median\",\"onStatisticField\":\"{num}\",\"outStatisticFieldName\":\"s\"}]"}},
+{"name": "post-count-arith", "params": {"f": "json", "where": "{arith}", "returnCountOnly": "true"}, "method": "POST"},
 {"name": "post-count-where", "params": {"f": "json", "where": "{where}", "returnCountOnly": "true"}, "method": "POST"}
 ]

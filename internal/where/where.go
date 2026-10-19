@@ -1,6 +1,6 @@
 // Package where parses and evaluates the SQL-92 `where` subset ArcGIS clients send:
 // = <> != < <= > >=, AND/OR/NOT, parentheses, [NOT] IN, [NOT] LIKE, IS [NOT] NULL, [NOT] BETWEEN,
-// UPPER/LOWER, TRUE/FALSE, string, number, DATE and TIMESTAMP literals. It follows ArcGIS Online
+// + - * / and || arithmetic, UPPER/LOWER, TRUE/FALSE, string, number, DATE and TIMESTAMP literals. It follows ArcGIS Online
 // hosted layers: logic is SQL's three-valued one, a literal converts to the type of the field it
 // is compared with, and other type mismatches are errors. Strings compare ignoring case (collation
 // caseSensitive false), LIKE included. Field names match case-insensitively.
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,8 +39,8 @@ type Resolver func(name string) (int, string, bool)
 // Match reports whether row satisfies the clause.
 func (c *Clause) Match(row Row) bool { return c.root.eval(row) == true }
 
-// Err reports a value a matched row could not convert: as on SQL Server, a string compared with a
-// number converts to one, and a query that meets one that does not fails.
+// Err reports what a matched row could not evaluate, which fails the query as on SQL Server: a
+// string meeting a number that does not convert to one, or a division by zero.
 func (c *Clause) Err() error {
 	if c.bad {
 		return &Error{c.where}
@@ -146,7 +147,7 @@ func lex(s string) ([]token, error) {
 			}
 			i += len(word)
 		default:
-			for _, op := range []string{"<>", "!=", "<=", ">=", "==", "=", "<", ">", "-", "+"} {
+			for _, op := range []string{"<>", "!=", "<=", ">=", "==", "=", "<", ">", "-", "+", "*", "/", "||"} {
 				if strings.HasPrefix(s[i:], op) {
 					out = append(out, token{kind: tOp, text: op})
 					i += len(op)
@@ -201,6 +202,8 @@ func (p *parser) keyword(k string) bool {
 
 var errSyntax = fmt.Errorf("syntax")
 
+var comparison = map[string]bool{"=": true, "==": true, "<>": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true}
+
 func (p *parser) or() (node, error) {
 	return p.chain("OR", p.and)
 }
@@ -242,14 +245,14 @@ func (p *parser) not() (node, error) {
 func pred(e expr) (node, error) { return node{e: e, k: kBool}, nil }
 
 func (p *parser) predicate() (node, error) {
-	l, err := p.value()
+	l, err := p.sum()
 	if err != nil {
 		return l, err
 	}
 	t := p.peek()
-	if t.kind == tOp && t.text != "-" && t.text != "+" {
+	if t.kind == tOp && comparison[t.text] {
 		p.pos++
-		r, err := p.value()
+		r, err := p.sum()
 		if err != nil {
 			return r, err
 		}
@@ -273,7 +276,7 @@ func (p *parser) predicate() (node, error) {
 		}
 		var list []node
 		for {
-			v, err := p.value()
+			v, err := p.sum()
 			if err != nil {
 				return v, err
 			}
@@ -293,7 +296,7 @@ func (p *parser) predicate() (node, error) {
 		}
 		return pred(in)
 	case p.keyword("LIKE"):
-		pat, err := p.value()
+		pat, err := p.sum()
 		if err != nil {
 			return pat, err
 		}
@@ -310,14 +313,14 @@ func (p *parser) predicate() (node, error) {
 		}
 		return pred(&likeExpr{text(l), text(pat), esc, neg, map[string]*regexp.Regexp{}})
 	case p.keyword("BETWEEN"):
-		lo, err := p.value()
+		lo, err := p.sum()
 		if err != nil {
 			return lo, err
 		}
 		if !p.keyword("AND") {
 			return l, errSyntax
 		}
-		hi, err := p.value()
+		hi, err := p.sum()
 		if err != nil {
 			return hi, err
 		}
@@ -331,6 +334,44 @@ func (p *parser) predicate() (node, error) {
 		return l, errSyntax
 	}
 	return l, nil
+}
+
+// sum parses terms joined by + - or ||, and term values joined by * or /, left to right.
+func (p *parser) sum() (node, error)  { return p.arith(p.term, "+", "-", "||") }
+func (p *parser) term() (node, error) { return p.arith(p.value, "*", "/") }
+
+func (p *parser) arith(operand func() (node, error), ops ...string) (node, error) {
+	l, err := operand()
+	for err == nil && p.peek().kind == tOp && slices.Contains(ops, p.peek().text) {
+		op := p.next().text
+		var r node
+		if r, err = operand(); err == nil {
+			l, err = p.combine(op, l, r)
+		}
+	}
+	return l, err
+}
+
+// combine types l op r: + adds numbers or joins strings, || joins strings, the rest are numeric.
+// Integers divide to an integer, as on SQL Server.
+func (p *parser) combine(op string, l, r node) (node, error) {
+	if op == "||" {
+		if l.k != kStr && l.k != kNull || r.k != kStr && r.k != kNull {
+			return l, errSyntax
+		}
+		return node{e: arithExpr{op: "+", l: l.e, r: r.e}, k: kStr}, nil
+	}
+	if err := p.unify(&l, &r, op); err != nil {
+		return l, err
+	}
+	k := max(l.k, r.k)
+	if k == kDate || k == kStr && op != "+" {
+		return l, errSyntax
+	}
+	if z, ok := r.e.(lit); ok && op == "/" && z.v == 0.0 {
+		return l, errSyntax
+	}
+	return node{e: arithExpr{op, l.e, r.e, l.int && r.int, p.clause}, k: k, int: l.int && r.int}, nil
 }
 
 func (p *parser) value() (node, error) {
@@ -538,6 +579,12 @@ type logicExpr struct {
 	l, r expr
 }
 type notExpr struct{ e expr }
+type arithExpr struct {
+	op     string
+	l, r   expr
+	int    bool
+	clause *Clause
+}
 type cmpExpr struct {
 	op   string
 	l, r expr
@@ -617,6 +664,33 @@ func (e logicExpr) eval(row Row) any {
 		return nil
 	}
 	return r
+}
+
+func (e arithExpr) eval(row Row) any {
+	a, b := e.l.eval(row), e.r.eval(row)
+	if a == nil || b == nil {
+		return nil
+	}
+	if s, ok := a.(string); ok {
+		return s + b.(string)
+	}
+	x, y := a.(float64), b.(float64)
+	switch e.op {
+	case "+":
+		return x + y
+	case "-":
+		return x - y
+	case "*":
+		return x * y
+	}
+	if y == 0 {
+		e.clause.bad = true // divide by zero
+		return nil
+	}
+	if e.int {
+		return math.Trunc(x / y)
+	}
+	return x / y
 }
 
 func (e notExpr) eval(row Row) any {

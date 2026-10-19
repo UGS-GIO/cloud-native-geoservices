@@ -47,23 +47,6 @@ var outputSRs = map[int]SpatialRef{102100: {102100, 3857}, 3857: {3857, 3857}, 1
 // selectAll is a where that is only 1=1, which needs no evaluating.
 var selectAll = regexp.MustCompile(`^\s*1\s*=\s*1\s*$`)
 
-// plusAsSpace turns + outside quotes into spaces, as Koop does for form-encoded where clauses.
-func plusAsSpace(w string) string {
-	b := []byte(strings.ReplaceAll(w, "''", "\x00\x00"))
-	single, double := false, false
-	for i, c := range b {
-		switch {
-		case c == '\'' && !double:
-			single = !single
-		case c == '"' && !single:
-			double = !double
-		case c == '+' && !single && !double:
-			b[i] = ' '
-		}
-	}
-	return strings.ReplaceAll(string(b), "\x00\x00", "''")
-}
-
 // Run answers a query over the provider's collection, as Koop's queryJson did.
 func Run(c *Collection, p Params) (*Response, error) {
 	f := p.Format()
@@ -188,7 +171,6 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 		}
 		whereStr = s
 	}
-	whereStr = plusAsSpace(whereStr)
 	if !selectAll.MatchString(whereStr) && strings.TrimSpace(whereStr) != "" {
 		e, err := where.Parse(whereStr, w.resolve)
 		if err != nil {

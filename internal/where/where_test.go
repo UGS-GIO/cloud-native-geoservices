@@ -64,6 +64,11 @@ func TestMatch(t *testing.T) {
 		{"count LIKE '3%'", lake, true},
 		{"date > 1900 AND date IN (1961, '1962')", row(nil, nil, nil, nil, nil, " 1961", nil), true}, // the string converts
 		{"name = 'x' AND name > 5", lake, false},
+		{"acres + 1 = 13.5 AND acres = 10 + 2.5", lake, true},
+		{"count * 2 - 1 = 5 AND count / 2 = 1 AND acres / 5 = 2.5", lake, true}, // integers divide to an integer
+		{"wetland_type + 's' = 'lakes' AND name || '!' = 'Utah Lake!'", lake, true},
+		{"date + 1 = 1962", row(nil, nil, nil, nil, nil, "1961", nil), true},
+		{"acres + 1 > 0", null, false},
 		{"timestamp > '2020-01-01'", row(nil, nil, nil, nil, nil, nil, int64(1600000000000)), true},
 		{"name = 'O''Brien'", row(nil, nil, "O'Brien", nil, nil), true},
 		{"acres > -1", lake, true},
@@ -88,7 +93,8 @@ func TestMatch(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE", "missing = 1", "missing IS NULL",
 		"timestamp = 0", "timestamp > 'x'", "count = '3.5'", "count = TRUE", "count",
-		"NOT name", "1", "acres > 1 AND name"} {
+		"NOT name", "1", "acres > 1 AND name",
+		"count / 0 = 1", "timestamp + 1 > 0", "name - 'a' = 'b'", "count || 'x' = 'y'"} {
 		if _, err := Parse(w, resolve); err == nil {
 			t.Errorf("%q parsed", w)
 		} else if !strings.Contains(err.Error(), `Invalid "where" parameter`) {
@@ -98,7 +104,7 @@ func TestParseErrors(t *testing.T) {
 }
 
 func TestConversionError(t *testing.T) {
-	for _, w := range []string{"name > 5", "name IN (5)", "acres > 1 AND name BETWEEN 1 AND 2"} {
+	for _, w := range []string{"name > 5", "name IN (5)", "acres > 1 AND name BETWEEN 1 AND 2", "name + 1 = 2", "acres / (count - 3) > 1"} {
 		e, err := Parse(w, resolve)
 		if err != nil {
 			t.Fatalf("%s: %v", w, err)

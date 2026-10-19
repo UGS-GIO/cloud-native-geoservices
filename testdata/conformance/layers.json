@@ -3,21 +3,21 @@
   {"name": "stream_gauges", "url": "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/StreamGaugesNHD/FeatureServer/0",
    "license": "UGRC State Geographic Information Database (SGID), public", "vars": {
     "num": "Measure", "int": "ComID", "str": "GuageName", "nullstr": "GuageName", "date": "LAST_UPDATE",
-    "where": "Measure > 50", "coerce": "Measure > '50'", "datestr": "LAST_UPDATE > '2011-07-01 00:00:00'", "strwhere": "GuageName LIKE 'Green%'", "datewhere": "LAST_UPDATE > TIMESTAMP '2011-07-01 00:00:00'",
+    "where": "Measure > 50", "arith": "Measure / 2 > 25", "coerce": "Measure > '50'", "datestr": "LAST_UPDATE > '2011-07-01 00:00:00'", "strwhere": "GuageName LIKE 'Green%'", "datewhere": "LAST_UPDATE > TIMESTAMP '2011-07-01 00:00:00'",
     "env": "-112.2,40.4,-111.6,41.0", "pt": "-111.89,40.76", "ids": "1,2,3,100,500",
     "poly": "{\"rings\":[[[-112.2,40.4],[-112.2,41.0],[-111.6,41.0],[-111.4,40.6],[-112.2,40.4]]],\"spatialReference\":{\"wkid\":4326}}",
     "tile": "-12523442.714243278,4931105.568302639,-12445171.192263355,5009377.085697312"}},
   {"name": "railroads", "url": "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahRailroads/FeatureServer/0",
    "license": "UGRC State Geographic Information Database (SGID), public", "vars": {
     "num": "Shape__Length", "int": "FIPS5", "str": "RAILROAD", "nullstr": "DIVISION",
-    "where": "FIPS5 = 49035", "coerce": "FIPS5 IN (' 49035 ', 49011)", "strwhere": "RAILROAD = 'SLGW'",
+    "where": "FIPS5 = 49035", "arith": "FIPS5 + 1 = 49036 AND FIPS5 = 49034 + 1", "coerce": "FIPS5 IN (' 49035 ', 49011)", "strwhere": "RAILROAD = 'SLGW'",
     "env": "-112.2,40.4,-111.6,41.0", "pt": "-111.89,40.76", "ids": "1,2,1137,3676",
     "poly": "{\"rings\":[[[-112.2,40.4],[-112.2,41.0],[-111.6,41.0],[-111.4,40.6],[-112.2,40.4]]],\"spatialReference\":{\"wkid\":4326}}",
     "tile": "-12523442.714243278,4931105.568302639,-12445171.192263355,5009377.085697312"}},
   {"name": "municipalities", "url": "https://services1.arcgis.com/99lidPhWCzftIe9K/ArcGIS/rest/services/UtahMunicipalBoundaries/FeatureServer/0",
    "license": "UGRC State Geographic Information Database (SGID), public", "vars": {
     "num": "Shape__Area", "int": "POPLASTCENSUS", "str": "COUNTYNBR", "nullstr": "SALESTAXID", "date": "UPDATED",
-    "where": "POPLASTCENSUS > 10000", "coerce": "POPLASTCENSUS > '10000'", "datestr": "UPDATED > '2020-01-01'", "strwhere": "NAME LIKE 'S%'", "datewhere": "UPDATED > DATE '2020-01-01'",
+    "where": "POPLASTCENSUS > 10000", "arith": "POPLASTCENSUS * 2 - 1 > 20000", "coerce": "POPLASTCENSUS > '10000'", "datestr": "UPDATED > '2020-01-01'", "strwhere": "NAME LIKE 'S%'", "datewhere": "UPDATED > DATE '2020-01-01'",
     "env": "-112.2,40.4,-111.6,41.0", "pt": "-111.89,40.76", "ids": "130,177,184,187",
     "poly": "{\"rings\":[[[-112.2,40.4],[-112.2,41.0],[-111.6,41.0],[-111.4,40.6],[-112.2,40.4]]],\"spatialReference\":{\"wkid\":4326}}",
     "tile": "-12523442.714243278,4931105.568302639,-12445171.192263355,5009377.085697312"}}
@@ -26,14 +26,14 @@
   {"name": "bridges", "url": "https://services.arcgis.com/xOi1kZaI0eWDREZv/ArcGIS/rest/services/NTAD_National_Bridge_Inventory/FeatureServer/0",
    "license": "USDOT BTS National Transportation Atlas Database (NTAD): US government work, public domain", "vars": {
     "num": "DECK_AREA", "int": "YEAR_BUILT_027", "str": "STATE_CODE_001", "nullstr": "LRS_INV_ROUTE_013A",
-    "where": "YEAR_BUILT_027 < 1950", "coerce": "YEAR_BUILT_027 < '1950'", "strwhere": "STATE_CODE_001 = '49'",
+    "where": "YEAR_BUILT_027 < 1950", "arith": "YEAR_BUILT_027 + 50 < 2000", "coerce": "YEAR_BUILT_027 < '1950'", "strwhere": "STATE_CODE_001 = '49'",
     "env": "-112.2,40.4,-111.6,41.0", "pt": "-111.89,40.76", "ids": "1,2,3,100000,500000",
     "poly": "{\"rings\":[[[-112.2,40.4],[-112.2,41.0],[-111.6,41.0],[-111.4,40.6],[-112.2,40.4]]],\"spatialReference\":{\"wkid\":4326}}",
     "tile": "-12523442.714243278,4931105.568302639,-12445171.192263355,5009377.085697312"}},
   {"name": "rail_lines", "url": "https://services.arcgis.com/xOi1kZaI0eWDREZv/ArcGIS/rest/services/NTAD_North_American_Rail_Network_Lines/FeatureServer/0",
    "license": "USDOT BTS National Transportation Atlas Database (NTAD): US government work, public domain", "vars": {
     "num": "MILES", "int": "TRACKS", "str": "RROWNER1", "nullstr": "DIVISION",
-    "where": "TRACKS > 1", "coerce": "TRACKS IN ('2', 3)", "strwhere": "STATEAB = 'UT'",
+    "where": "TRACKS > 1", "arith": "TRACKS * 2 > 3", "coerce": "TRACKS IN ('2', 3)", "strwhere": "STATEAB = 'UT'",
     "env": "-112.2,40.4,-111.6,41.0", "pt": "-111.89,40.76", "ids": "1,2,3,100000,300000",
     "poly": "{\"rings\":[[[-112.2,40.4],[-112.2,41.0],[-111.6,41.0],[-111.4,40.6],[-112.2,40.4]]],\"spatialReference\":{\"wkid\":4326}}",
     "tile": "-12523442.714243278,4931105.568302639,-12445171.192263355,5009377.085697312"}}

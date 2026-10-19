@@ -44,6 +44,7 @@ func run(t *testing.T, q string) string {
 func TestRun(t *testing.T) {
 	tests := []struct{ q, want string }{
 		{"where=kind='Lake'&returnCountOnly=true", `{"count":2}`},
+		{"where=acres+%2B+1+=+6&returnCountOnly=true", `{"count":1}`},
 		{"where=1=1&returnIdsOnly=true&orderByFields=acres DESC", `{"objectIdFieldName":"feature_id","objectIds":[1,3,2]}`},
 		{"outStatistics=" + url.QueryEscape(`[{"statisticType":"sum","onStatisticField":"acres","outStatisticFieldName":"s"}]`) + "&groupByFieldsForStatistics=kind",
 			`{"displayFieldName":"","fields":[{"name":"s","type":"esriFieldTypeDouble","sqlType":"sqlTypeFloat","alias":"s","domain":null,"defaultValue":null},{"name":"kind","type":"esriFieldTypeString","alias":"kind","sqlType":"sqlTypeOther","domain":null,"defaultValue":null,"length":128}],"features":[{"attributes":{"s":6.5,"kind":"Lake"}},{"attributes":{"kind":"Pond"}}]}`},
