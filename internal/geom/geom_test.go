@@ -241,3 +241,20 @@ func TestNear(t *testing.T) {
 		t.Error("units")
 	}
 }
+
+// ArcGIS Online's answers for stream gauges 1 and 500 with outSR=4269.
+func TestNAD83(t *testing.T) {
+	for _, c := range [][2]orb.Point{
+		{{-111.59459446387113, 36.872210193643}, {-111.59458324271147, 36.87220459829195}},
+		{{-110.88998916213056, 40.62101523307119}, {-110.88997765021413, 40.62100913407787}},
+	} {
+		got := ToNAD83(c[0])
+		if math.Abs(got[0]-c[1][0]) > 1e-9 || math.Abs(got[1]-c[1][1]) > 1e-9 {
+			t.Errorf("ToNAD83(%v) = %v, want %v", c[0], got, c[1])
+		}
+		back := FromNAD83(got)
+		if math.Abs(back[0]-c[0][0]) > 1e-9 || math.Abs(back[1]-c[0][1]) > 1e-9 {
+			t.Errorf("FromNAD83(%v) = %v, want %v", got, back, c[0])
+		}
+	}
+}

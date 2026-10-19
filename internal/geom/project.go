@@ -16,7 +16,7 @@ const (
 )
 
 // Mercator wkids: what we project to and from.
-var Mercator = map[int]bool{102100: true, 102113: true, 3857: true, 900913: true}
+var Mercator = map[int]bool{102100: true, 102113: true, 3857: true, 3785: true, 900913: true}
 
 func adjustLon(x float64) float64 {
 	if math.Abs(x) <= spi {

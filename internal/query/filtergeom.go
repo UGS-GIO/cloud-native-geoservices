@@ -61,8 +61,11 @@ func filterGeometry(v any, inSR any) (orb.Geometry, error) {
 	if srid != 0 && !supported(srid) {
 		return nil, Bad("Unsupported spatial reference: " + strconv.Itoa(srid))
 	}
-	if geom.Mercator[srid] || srid == 3785 {
+	switch {
+	case geom.Mercator[srid]:
 		g = project.Geometry(g, geom.ToLonLat)
+	case srid == 4269:
+		g = project.Geometry(g, geom.FromNAD83)
 	}
 	return g, nil
 }

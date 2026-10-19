@@ -138,11 +138,14 @@ func (p Params) Validate() error {
 			return Bad("'units' parameter is invalid")
 		}
 	}
-	for _, k := range []string{"outSR", "inSR"} {
-		if v, ok := p[k]; ok {
-			if id, ok := wkid(v); ok && !supported(id) {
-				return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326 and Web Mercator (102100, 3857) are supported")
-			}
+	if v, ok := p["outSR"]; ok {
+		if id, _ := wkid(v); outputSRs[id].Wkid == 0 {
+			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785) are supported")
+		}
+	}
+	if v, ok := p["inSR"]; ok {
+		if id, ok := wkid(v); ok && !supported(id) {
+			return Bad("Unsupported spatial reference: "+strconv.Itoa(id), "Only 4326, 4269 and Web Mercator (102100, 3857, 102113, 3785, 900913) are supported")
 		}
 	}
 	return nil

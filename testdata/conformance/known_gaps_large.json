@@ -145,10 +145,8 @@
    "reason": "f=pbf lists fields in alphabetical order, not schema order."},
   {"match": [
    "*: *spatialReference.latestWkid (missing)",
-   "*/features-3857: spatialReference.wkid (value)",
-   "*/extent-3857: extent.spatialReference.wkid (value)",
    "*/layer: spatialReference (missing)"],
-   "reason": "outSR=3857 is answered as wkid 3857, where Esri writes 102100 with latestWkid 3857. Extents and f=pbf leave out latestWkid, and the layer has no spatialReference."},
+   "reason": "f=pbf leaves out latestWkid, and the layer has no spatialReference."},
   {"match": [
    "*: globalIdFieldName (*)",
    "*/layer: globalIdField (value)"],

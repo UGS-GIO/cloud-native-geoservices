@@ -40,9 +40,40 @@ func (s SpatialRef) AppendJSON(buf []byte) []byte {
 	return jsonx.Append(buf, jsonx.Obj{{K: "wkid", V: s.Wkid}, {K: "latestWkid", V: s.Latest}})
 }
 
-// outputSRs is Koop's normalization of the response spatial reference; anything else is 4326.
-var outputSRs = map[int]SpatialRef{102100: {102100, 3857}, 3857: {3857, 3857}, 102113: {102113, 3785},
-	3785: {3785, 3785}, 4269: {4269, 4269}}
+// outputSRs are the spatial references a response can be in, labeled as ArcGIS Online labels them.
+var outputSRs = map[int]SpatialRef{0: {4326, 4326}, 4326: {4326, 4326}, 4269: {4269, 4269},
+	102100: {102100, 3857}, 3857: {102100, 3857}, 102113: {102113, 3785}, 3785: {102113, 3785}}
+
+// project is how a lon/lat point becomes a point in s, nil when it stays as it is.
+func (s SpatialRef) project() orb.Projection {
+	switch s.Wkid {
+	case 102100, 102113:
+		return geom.ToMercator
+	case 4269:
+		return geom.ToNAD83
+	}
+	return nil
+}
+
+// Envelope is a lon/lat bounding box (empty when inverted) in s. Web Mercator clamps latitude to
+// ±85.0511.
+func (s SpatialRef) Envelope(b [4]float64) jsonx.Obj {
+	switch {
+	case b[0] > b[2]:
+	case s.Wkid == 102100 || s.Wkid == 102113:
+		b[0], b[1] = geom.ExtentToMercator(b[0], b[1])
+		b[2], b[3] = geom.ExtentToMercator(b[2], b[3])
+	case s.Wkid == 4269:
+		ring := orb.Ring{{b[0], b[1]}, {b[0], b[3]}, {b[2], b[3]}, {b[2], b[1]}}
+		e := geom.Projected(ring, geom.ToNAD83).Bound()
+		b = [4]float64{e.Min[0], e.Min[1], e.Max[0], e.Max[1]}
+	}
+	return jsonx.Obj{{K: "xmin", V: b[0]}, {K: "ymin", V: b[1]}, {K: "xmax", V: b[2]}, {K: "ymax", V: b[3]},
+		{K: "spatialReference", V: s}}
+}
+
+// OutputSR is the spatial reference a response to outSR wkid (0 when not given) is in.
+func OutputSR(wkid int) SpatialRef { return outputSRs[wkid] }
 
 // selectAll is a where that is only 1=1, which needs no evaluating.
 var selectAll = regexp.MustCompile(`^\s*1\s*=\s*1\s*$`)
@@ -144,9 +175,9 @@ type winnow struct {
 	limit      int // resultRecordCount + 1, or 0
 	offset     int
 	distinct   bool
-	toMercator bool
 	outSR      SpatialRef
-	geometry   bool // returnGeometry
+	toSR       orb.Projection // outSR's projection, nil for lon/lat
+	geometry   bool           // returnGeometry
 	precision  *int
 	project    func(orb.Point) orb.Point // outGeometry's, once worked out
 	aggregates []aggregate
@@ -254,10 +285,7 @@ func newWinnow(c *Collection, p Params) (*winnow, error) {
 		outID, _ = wkid(v)
 	}
 	w.outSR = outputSRs[outID]
-	if w.outSR.Wkid == 0 {
-		w.outSR = SpatialRef{4326, 4326}
-	}
-	w.toMercator = geom.Mercator[outID] && outID != 0
+	w.toSR = w.outSR.project()
 	if b, ok := p["returnGeometry"].(bool); ok && !b {
 		w.geometry = false
 	}
@@ -357,13 +385,16 @@ func (w *winnow) idMatch(ft *Feature) bool {
 
 // outGeometry projects and rounds a feature's geometry for output.
 func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
-	if g == nil || !w.toMercator && w.precision == nil {
-		return g
+	if g == nil {
+		return nil
 	}
 	if w.project == nil {
 		w.project = w.outPoint
-		if w.toMercator && w.precision == nil {
-			w.project = geom.ToMercator
+		if w.precision == nil {
+			w.project = w.toSR
+		}
+		if w.project == nil {
+			return g
 		}
 	}
 	// g may be a cached shape, so it is projected into a copy.
@@ -371,8 +402,8 @@ func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
 }
 
 func (w *winnow) outPoint(p orb.Point) orb.Point {
-	if w.toMercator {
-		p = geom.ToMercator(p)
+	if w.toSR != nil {
+		p = w.toSR(p)
 	}
 	if w.precision != nil {
 		p = orb.Point{toFixed(p[0], *w.precision), toFixed(p[1], *w.precision)}
@@ -506,15 +537,5 @@ func (w *winnow) extentOf(idx []int) any {
 	if b.Min[0] > b.Max[0] {
 		return nil
 	}
-	if w.toMercator {
-		b.Min[0], b.Min[1] = geom.ExtentToMercator(b.Min[0], b.Min[1])
-		b.Max[0], b.Max[1] = geom.ExtentToMercator(b.Max[0], b.Max[1])
-	}
-	return Extent(jsonx.Obj{{K: "wkid", V: w.outSR.Wkid}}, b.Min[0], b.Min[1], b.Max[0], b.Max[1])
-}
-
-// Extent is an Esri envelope in spatial reference sr.
-func Extent(sr jsonx.Obj, xmin, ymin, xmax, ymax float64) jsonx.Obj {
-	return jsonx.Obj{{K: "xmin", V: xmin}, {K: "ymin", V: ymin}, {K: "xmax", V: xmax}, {K: "ymax", V: ymax},
-		{K: "spatialReference", V: sr}}
+	return w.outSR.Envelope([4]float64{b.Min[0], b.Min[1], b.Max[0], b.Max[1]})
 }

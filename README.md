@@ -149,7 +149,8 @@ go to the first listed), else gzip, else none, and each coding has its own ETag.
 
 - Point layers return multipoint geometry in `f=json` and `f=geojson`.
 - `outSR` and `inSR`: only 4326, 4269 and Web Mercator (3857, 102100 and aliases). Other spatial
-  references give a 400.
+  references give a 400. As on ArcGIS Online, 4269 converts with WGS_1984_(ITRF00)_To_NAD_1983,
+  and an `outSR` of 900913 is a 400.
 - `f=geojson` does not fully conform to RFC 7946 (for example, the multipoint geometry above).
 - Statistics are not typed by their source field. For example, `min` of an integer field is
   reported as a double.

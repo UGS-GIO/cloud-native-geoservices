@@ -22,7 +22,6 @@ import (
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/plan"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
 	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
@@ -186,7 +185,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		n := layer.Rows
 		c.Count = &n
 		if p.Kind == plan.Extent && layer.Extent != nil {
-			c.Extent = projectExtent(layer.Extent, p.OutSR)
+			c.Extent = query.OutputSR(p.OutSR).Envelope(*layer.Extent)
 		}
 		return c, nil
 	}
@@ -619,13 +618,4 @@ func overview(item *catalog.Item, tolerance float64) string {
 		}
 	}
 	return href
-}
-
-func projectExtent(e *[4]float64, wkid int) jsonx.Obj {
-	if !geom.Mercator[wkid] {
-		return query.Extent(jsonx.Obj{{K: "wkid", V: 4326}}, e[0], e[1], e[2], e[3])
-	}
-	xmin, ymin := geom.ExtentToMercator(e[0], e[1])
-	xmax, ymax := geom.ExtentToMercator(e[2], e[3])
-	return query.Extent(jsonx.Obj{{K: "wkid", V: 102100}, {K: "latestWkid", V: 3857}}, xmin, ymin, xmax, ymax)
 }
