@@ -36,8 +36,8 @@ func helmert(p orb.Point, sign, from, to float64) orb.Point {
 
 func toECEF(p orb.Point, f float64) (float64, float64, float64) {
 	e2 := f * (2 - f)
-	lon, lat := p[0]*d2r, p[1]*d2r
-	n := radius / math.Sqrt(1-e2*math.Sin(lat)*math.Sin(lat))
+	lon, lat := p[0]*math.Pi/180, p[1]*math.Pi/180
+	n := orb.EarthRadius / math.Sqrt(1-e2*math.Sin(lat)*math.Sin(lat))
 	return n * math.Cos(lat) * math.Cos(lon), n * math.Cos(lat) * math.Sin(lon), n * (1 - e2) * math.Sin(lat)
 }
 
@@ -46,9 +46,9 @@ func fromECEF(x, y, z, f float64) orb.Point {
 	p := math.Hypot(x, y)
 	lat := math.Atan2(z, p*(1-e2))
 	for range 5 {
-		n := radius / math.Sqrt(1-e2*math.Sin(lat)*math.Sin(lat))
+		n := orb.EarthRadius / math.Sqrt(1-e2*math.Sin(lat)*math.Sin(lat))
 		h := p/math.Cos(lat) - n
 		lat = math.Atan2(z, p*(1-e2*n/(n+h)))
 	}
-	return orb.Point{math.Atan2(y, x) * r2d, lat * r2d}
+	return orb.Point{math.Atan2(y, x) * 180 / math.Pi, lat * 180 / math.Pi}
 }
