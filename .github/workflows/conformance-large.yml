@@ -1,0 +1,30 @@
+name: conformance-large
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  large:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download the large layers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download conformance-data --repo "$GITHUB_REPOSITORY" \
+            --pattern conformance-large.tar.gz --dir "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/large"
+          tar -xzf "$RUNNER_TEMP/conformance-large.tar.gz" -C "$RUNNER_TEMP/large"
+      - run: go test ./conformance -run TestLarge -v -timeout 60m
+        env:
+          CONFORMANCE_LARGE: ${{ runner.temp }}/large

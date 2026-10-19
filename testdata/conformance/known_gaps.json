@@ -1,0 +1,193 @@
+{
+ "ignore": [
+  {"match": [
+   "*/error-*: error.message (value)",
+   "*/error-*: error.details* (*)"],
+   "reason": "Error messages and details are free text; the error code is compared."},
+  {"match": [
+   "*: fields[*].sqlType (value)"],
+   "reason": "Clients do not read sqlType, and AGOL writes sqlTypeOther for almost every field."},
+  {"match": [
+   "*: fields[*].defaultValue (*)",
+   "*: geometryProperties (missing)",
+   "*/layer: hasGeometryProperties (missing)"],
+   "reason": "The GeoParquet copy keeps values only: no field defaults, and Shape__Area/Shape__Length are plain fields, not AGOL's computed shape fields."},
+  {"match": [
+   "*/layer: description (value)",
+   "*/layer: copyrightText (value)",
+   "*/layer: serviceItemId (missing)",
+   "*/layer: editingInfo (missing)",
+   "*/layer: hasMetadata (missing)",
+   "*/layer: cacheMaxAge (missing)",
+   "*/layer: currentVersion (value)",
+   "*/layer: indexes (length)",
+   "*/layer: templates (length)",
+   "*/layer: htmlPopupType (value)",
+   "*/layer: infoInEstimates (missing)",
+   "*/layer: drawingInfo.*"],
+   "reason": "These describe the hosted item: its text, edit history, indexes, popups and default symbol. Symbols here come from renders."},
+  {"match": [
+   "*/layer: advancedQueryCapabilities.*",
+   "*/layer: advancedEditingCapabilities (missing)",
+   "*/layer: advancedQueryAnalyticCapabilities (missing)",
+   "*/layer: queryBinsCapabilities (missing)",
+   "*/layer: capabilities (value)",
+   "*/layer: allowGeometryUpdates (value)",
+   "*/layer: allowTrueCurvesUpdates (missing)",
+   "*/layer: onlyAllowTrueCurveUpdatesByTrueCurveClients (missing)",
+   "*/layer: trueCurveSupportMode (missing)",
+   "*/layer: supportedCurveTypes (missing)",
+   "*/layer: supportedTrueCurvePbfFeatureEncodings (missing)",
+   "*/layer: supportedAppend*",
+   "*/layer: supportedExportFormats (value)",
+   "*/layer: supportedConvert*",
+   "*/layer: supportedContingentValuesFormats (value)",
+   "*/layer: supportsContingentValues (missing)",
+   "*/layer: supportsEditingContingentValues (missing)",
+   "*/layer: supportedSyncDataOptions (missing)",
+   "*/layer: supportsAppend (value)",
+   "*/layer: supportsApplyEditsWithGlobalIds (value)",
+   "*/layer: supportsASyncCalculate (value)",
+   "*/layer: supportsAttachments* (value)",
+   "*/layer: supportsCalculate (value)",
+   "*/layer: supportsTruncate (value)",
+   "*/layer: supportsRollbackOnFailureParameter (value)",
+   "*/layer: supportsValidateSql (value)",
+   "*/layer: supportsFieldDescriptionProperty (value)",
+   "*/layer: supportsFieldGroups (missing)",
+   "*/layer: supportsLayerOverrides (value)",
+   "*/layer: supportsQuantizationEditMode (value)",
+   "*/layer: supportsColumnStoreIndex (missing)",
+   "*/layer: supportsMultiScaleGeometry (missing)",
+   "*/layer: supportsReturningQueryGeometry (value)",
+   "*/layer: supportsExceedsLimitStatistics (value)",
+   "*/layer: collation (missing)",
+   "*/layer: supportedOperationsWithCollation (missing)",
+   "*/layer: guidFormat (missing)",
+   "*/layer: enableNullGeometry (missing)",
+   "*/layer: maxIdsCount (missing)",
+   "*/layer: fields[*].editable (value)",
+   "*/layer: fields[*].precision (missing)",
+   "*/layer: dateFieldsTimeReference.timeZoneIANA (missing)"],
+   "reason": "Capabilities this server does not implement (editing, curves, attachments, analytics, export, sync, collation). It reports them as unsupported or leaves them out."},
+  {"match": [
+   "*/layer: hasLabels (extra)",
+   "*/layer: ownershipBasedAccessControlForFeatures (extra)",
+   "*/layer: supportedPbfFeatureEncodings (extra)",
+   "*/layer: timeInfo (extra)"],
+   "reason": "Koop's layer defaults; harmless."},
+  {"match": [
+   "*/layer: extent (value)",
+   "*/layer: extent.*min (value)",
+   "*/layer: extent.*max (value)"],
+   "reason": "AGOL does not refresh a hosted layer's extent (here null, one segment, or an older boundary); returnExtentOnly is compared instead."}
+ ],
+ "known": [
+  {"match": [
+   "*/count-extent: extent.xmin (value)",
+   "*/count-extent: extent.ymin (value)",
+   "*/count-extent: extent.xmax (value)",
+   "*/count-extent: extent.ymax (value)"],
+   "reason": "returnCountOnly with returnExtentOnly gives the count and a null extent. The JS API's queryExtent() sends both, so zoom to features fails."},
+  {"match": [
+   "*/count-point-distance: count (value)"],
+   "reason": "A point given as text (geometry=x,y) is read as no geometry, so the query is not filtered at all."},
+  {"match": [
+   "*/count-point-json-distance: count (value)",
+   "*/count-point-meters: count (value)"],
+   "reason": "distance and units only widen the row-group prefilter; the exact test uses the bare point."},
+  {"match": [
+   "*/error-where-field: error (missing)",
+   "*/error-where-field: count (extra)",
+   "*/error-outfields: *",
+   "*/error-orderby: *",
+   "*/error-stats-field: *"],
+   "reason": "An unknown field in where, outFields, orderByFields or outStatistics is not an error: where matches nothing, outFields and orderByFields are dropped, and the statistic is empty."},
+  {"match": [
+   "railroads/count-strwhere-lower: count (value)",
+   "*/distinct-ordered: features[].attributes.* (value)",
+   "*/stats-grouped-ordered: features[].attributes.* (value)"],
+   "reason": "Esri's hosted layers compare and sort strings case-insensitively (collation caseSensitive false). We compare with = and sort byte by byte."},
+  {"match": [
+   "municipalities/ids-within-point: objectIds (length)"],
+   "reason": "spatialRel=esriSpatialRelWithin with a point inside a polygon feature finds nothing."},
+  {"match": [
+   "*/stats*: features[].attributes.stddev_v (value)"],
+   "reason": "stddev is the population standard deviation; Esri's is the sample one. var matches."},
+  {"match": [
+   "*/stats-string: features[].attributes.min_v (missing)",
+   "*/stats-string: features[].attributes.max_v (missing)"],
+   "reason": "min and max of a string field are left out."},
+  {"match": [
+   "*/stats*: fields[*].type (value)",
+   "*/stats*: fields[*].length (missing)"],
+   "reason": "Statistics fields are not typed by their source: count is a double (Esri: integer), min and max of an integer field are doubles, and string and date results have no length."},
+  {"match": [
+   "*/stats-default-name: features[].attributes.* (*)",
+   "*/stats-default-name: fields[*] (*)"],
+   "reason": "The default outStatisticFieldName is count_feature_id; Esri's is COUNT_OBJECTID."},
+  {"match": [
+   "*/stats*: displayFieldName (extra)",
+   "*/stats*: geometryType (missing)",
+   "*/stats*: objectIdFieldName (missing)",
+   "*/stats*: spatialReference (missing)",
+   "*/stats*: uniqueIdField (missing)"],
+   "reason": "Statistics answers carry Koop's displayFieldName and leave out objectIdFieldName, uniqueIdField, geometryType and spatialReference."},
+  {"match": [
+   "*/distinct-count: count (value)"],
+   "reason": "returnCountOnly with returnDistinctValues counts rows, not distinct values."},
+  {"match": [
+   "*/geojson: features[].id (missing)",
+   "*/geojson-subset: features[].type (missing)",
+   "*/geojson-count: count (extra)",
+   "*/geojson-count: features (missing)",
+   "*/geojson-count: properties (missing)",
+   "*/geojson-count: type (missing)"],
+   "reason": "f=geojson: features have no id, have no type when outFields is not *, and a count is {\"count\": n} where Esri writes a FeatureCollection with properties.count."},
+  {"match": [
+   "*/features-subset-case: features[].attributes.* (missing)",
+   "*/features-subset-case: fields[*] (missing)"],
+   "reason": "outFields names are case-sensitive; Esri matches them in any case."},
+  {"match": [
+   "*/features-utm: error (extra)",
+   "*/features-utm: * (missing)"],
+   "reason": "outSR other than 4326, 4269 and Web Mercator is a 400."},
+  {"match": [
+   "*/features-subset: fields (order)",
+   "*/distinct-two: fields (order)"],
+   "reason": "Fields follow the schema order; Esri lists them in outFields order."},
+  {"match": [
+   "*/pbf: fields (order)"],
+   "reason": "f=pbf lists fields in alphabetical order, not schema order."},
+  {"match": [
+   "*: *spatialReference.latestWkid (missing)",
+   "*/features-3857: spatialReference.wkid (value)",
+   "*/extent-3857: extent.spatialReference.wkid (value)",
+   "*/layer: spatialReference (missing)"],
+   "reason": "outSR=3857 is answered as wkid 3857, where Esri writes 102100 with latestWkid 3857. Extents and f=pbf leave out latestWkid, and the layer has no spatialReference."},
+  {"match": [
+   "*: fields[GlobalID].type (value)",
+   "*: globalIdFieldName (*)",
+   "*/layer: globalIdField (value)"],
+   "reason": "A GlobalID field cannot be declared, so it is a string field and globalIdFieldName is empty."},
+  {"match": [
+   "*: fields[*].length (value)",
+   "*/layer: fields[*].nullable (value)"],
+   "reason": "String fields have length 128 and date fields 36, and every field is nullable false. Esri gives the real lengths (dates 8) and nullable true."},
+  {"match": [
+   "*/layer: supportsCoordinatesQuantization (value)",
+   "*/layer: supportedQueryFormats (value)"],
+   "reason": "The layer says supportsCoordinatesQuantization false and supportedQueryFormats \"JSON,geojson,PBF\", though quantization works."},
+  {"match": [
+   "*/layer: tileMaxRecordCount (value)",
+   "*/layer: standardMaxRecordCount (value)",
+   "*/layer: standardMaxRecordCountNoGeometry (value)"],
+   "reason": "The layer reports 2000 for every page size; tileMaxRecordCount is not TILE_MAX_RECORDS."},
+  {"match": [
+   "*/layer: displayField (value)"],
+   "reason": "displayField is the id field; Esri names a text field."},
+  {"match": [
+   "*/layer: supportedSpatialRelationships (length)"],
+   "reason": "Only four spatialRel values are supported (README)."}
+ ]
+}
