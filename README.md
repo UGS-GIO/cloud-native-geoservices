@@ -233,6 +233,13 @@ go test ./internal/where -fuzz FuzzParse        # also FuzzFromWKB (geom), FuzzR
 | `internal/jsonx`, `internal/lru` | ordered JSON writer; byte-bounded LRU |
 | `conformance`, `cmd/conformance-record` | comparison with recorded Esri answers; the recorder |
 
+## AI use
+
+Portions of this repository (code, infrastructure and docs) are developed with AI assistance
+under human direction. AI is a supporting tool, not an author: every commit and merge is
+authored, reviewed and approved by a person, who is accountable for it. This note will be
+replaced with a link to UGS's survey-wide AI-use circular once it is published.
+
 ## License
 
 MIT
