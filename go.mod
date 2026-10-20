@@ -2,7 +2,7 @@ module github.com/UGS-GIO/geoparquet-featureserver
 
 go 1.26.3
 
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	github.com/andybalholm/brotli v1.2.6
