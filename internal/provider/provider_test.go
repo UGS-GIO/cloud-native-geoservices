@@ -163,3 +163,34 @@ func TestLevels(t *testing.T) {
 		t.Errorf("levels %v", got)
 	}
 }
+
+func TestVersionCoversOverviews(t *testing.T) {
+	root, _ := filepath.Abs("../../testdata")
+	dir := t.TempDir()
+	ov := filepath.Join(dir, "overview_1.parquet")
+	copyFile(t, filepath.Join(root, "qfaults.parquet"), ov)
+	items := `{"items": [{"id": "qfaults", "assets": {"data": {"href": "` + root + `/qfaults.parquet"},
+		"overview_1": {"href": "` + ov + `", "ugs:simplify_tolerance": 0.001}}}]}`
+	path := filepath.Join(dir, "items.json")
+	os.WriteFile(path, []byte(items), 0o644)
+	pr := &Provider{Catalog: catalog.New(catalog.STAC{URL: path}, 0), Reader: pq.NewReader(16<<20, 16<<20, 64<<20),
+		Shapes: geom.NewShapes(16 << 20)}
+	before, err := pr.Version(context.Background(), "qfaults", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyFile(t, filepath.Join(root, "geolunits.parquet"), ov)
+	if after, _ := pr.Version(context.Background(), "qfaults", "default"); after == before {
+		t.Error("a rewritten overview keeps the version")
+	}
+}
+
+func copyFile(t *testing.T, from, to string) {
+	b, err := os.ReadFile(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
