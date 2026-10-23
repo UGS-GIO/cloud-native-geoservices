@@ -99,6 +99,33 @@ func TestUnsignedIDStatistics(t *testing.T) {
 	}
 }
 
+func TestInt64FieldTypes(t *testing.T) {
+	type row struct {
+		ID    int64  `parquet:"feature_id"`
+		Count int64  `parquet:"count"`
+		Key   int64  `parquet:"key"`
+		Empty *int64 `parquet:"empty,optional"`
+	}
+	path := filepath.Join(t.TempDir(), "ints.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f)
+	w.Write([]row{{ID: 1, Count: -5, Key: 8489717270951711}, {ID: 2, Count: 19, Key: 160384871698236}})
+	w.Close()
+	f.Close()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, c := range l.Columns {
+		got[c.Name] = c.Type
+	}
+	// A column with no statistics may hold anything.
+	if got["count"] != "Integer" || got["key"] != "BigInteger" || got["empty"] != "BigInteger" {
+		t.Errorf("types %v", got)
+	}
+}
+
 func TestAppendKey(t *testing.T) {
 	key := func(v *Values, i int) (string, bool) {
 		b, ok := v.AppendKey(nil, i, '|')

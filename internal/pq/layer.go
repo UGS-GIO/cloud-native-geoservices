@@ -33,7 +33,7 @@ var BBox = []string{"bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax"}
 // Column is one attribute: its name and the Esri type the provider declares for it.
 type Column struct {
 	Name string
-	Type string // Integer, Double, Date or String
+	Type string // Integer, BigInteger, Double, Date or String
 }
 
 // Group is one row group: its rows and the bounds its statistics give.
@@ -142,6 +142,15 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		l.Groups = append(l.Groups, g)
 	}
 	l.Rows = start
+	// A 64-bit column whose statistics fit in 32 bits is an Integer, as AGOL types such a field.
+	for i, c := range l.Columns {
+		if c.Type == "BigInteger" && !slices.ContainsFunc(md.RowGroups, func(rg format.RowGroup) bool {
+			lo, hi := l.stat(rg, c.Name, false), l.stat(rg, c.Name, true)
+			return !(lo >= math.MinInt32 && hi <= math.MaxInt32)
+		}) {
+			l.Columns[i].Type = "Integer"
+		}
+	}
 	if l.HasBBox {
 		e := [4]float64{math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)}
 		for _, g := range l.Groups {
@@ -242,7 +251,9 @@ func fieldType(el *format.SchemaElement) string {
 		return "Date"
 	case format.Int32, format.Boolean:
 		return "Integer"
-	case format.Int64, format.Double, format.Float:
+	case format.Int64:
+		return "BigInteger"
+	case format.Double, format.Float:
 		return "Double"
 	}
 	return "String"

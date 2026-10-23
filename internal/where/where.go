@@ -471,7 +471,7 @@ func (p *parser) column(name string) (node, error) {
 		return node{}, errSyntax
 	}
 	switch typ {
-	case "Integer":
+	case "Integer", "BigInteger":
 		return node{e: field(i), k: kNum, int: true}, nil
 	case "Double":
 		return node{e: field(i), k: kNum}, nil
