@@ -48,6 +48,8 @@ type leaf struct {
 	kind  Kind
 	flat  bool // one value per row
 	conv  func(b *builder, v parquet.Value)
+	// unsigned integers, whose statistics number reads as signed
+	unsigned bool
 }
 
 // Layer is one opened data file.
@@ -123,7 +125,7 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		}
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv}
+		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
@@ -174,7 +176,7 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 // stat is a row group's min or max statistic for a numeric column, NaN when absent.
 func (l *Layer) stat(rg format.RowGroup, name string, isMax bool) float64 {
 	lf, ok := l.leaves[name]
-	if !ok {
+	if !ok || lf.unsigned {
 		return math.NaN()
 	}
 	cm := rg.Columns[lf.index].MetaData
@@ -202,6 +204,15 @@ func number(t format.Type, b []byte) float64 {
 
 func converted(el *format.SchemaElement) (deprecated.ConvertedType, bool) {
 	return el.ConvertedType.Get()
+}
+
+// unsigned reports an unsigned integer column.
+func unsigned(el *format.SchemaElement) bool {
+	if it, ok := el.LogicalType.Value.(*format.IntType); ok && !it.IsSigned {
+		return true
+	}
+	ct, ok := converted(el)
+	return ok && (ct == deprecated.Uint8 || ct == deprecated.Uint16 || ct == deprecated.Uint32 || ct == deprecated.Uint64)
 }
 
 // fieldType is the Esri type the provider declares for a column: String exactly when converter

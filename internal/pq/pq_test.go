@@ -80,6 +80,25 @@ func TestIDsWhenIDsAreNotRowNumbers(t *testing.T) {
 	}
 }
 
+func TestUnsignedIDStatistics(t *testing.T) {
+	type row struct {
+		ID uint32 `parquet:"feature_id"`
+	}
+	path := filepath.Join(t.TempDir(), "uint.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f)
+	w.Write([]row{{5}, {3_000_000_000}})
+	w.Close()
+	f.Close()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids, _ := l.Select(context.Background(), Selection{IDs: []int64{3_000_000_000}}); !slices.Equal(ids, []int64{1}) {
+		t.Errorf("an id above int32 in a uint32 column %v", ids)
+	}
+}
+
 func TestAppendKey(t *testing.T) {
 	key := func(v *Values, i int) (string, bool) {
 		b, ok := v.AppendKey(nil, i, '|')
