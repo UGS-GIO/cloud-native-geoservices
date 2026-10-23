@@ -44,12 +44,26 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 			for _, id := range s.IDs {
 				want[id] = true
 			}
-			all := l.AllRows()
-			got, err := l.Read(ctx, []string{"feature_id"}, all)
+			// Read feature_id only in the row groups whose statistics may hold a wanted id.
+			var cand []int64
+			for _, g := range l.Groups {
+				if !slices.ContainsFunc(s.IDs, func(id int64) bool {
+					return !(float64(id) < g.IDMin) && !(float64(id) > g.IDMax)
+				}) {
+					continue
+				}
+				for r := g.Start; r < g.Start+g.Rows; r++ {
+					cand = append(cand, r)
+				}
+			}
+			if len(cand) == 0 {
+				break
+			}
+			got, err := l.Read(ctx, []string{"feature_id"}, cand)
 			if err != nil {
 				return nil, err
 			}
-			for i, r := range all {
+			for i, r := range cand {
 				if id, ok := got.Get(0, i).(int64); ok && want[id] {
 					rows = append(rows, r)
 				}

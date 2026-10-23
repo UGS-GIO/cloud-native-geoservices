@@ -150,7 +150,8 @@ These are recommended:
   known.
 - Rows sorted spatially, for example in Hilbert order, with `feature_id` assigned in that order.
 - `feature_id` equal to the row number plus 1. Then the server finds an object id without reading
-  the `feature_id` column.
+  the `feature_id` column. Otherwise it reads `feature_id` in the row groups whose statistics may
+  hold the id, so ids in order keep that read small.
 - Small row groups and a page index (the column index and offset index). Small pages on the bbox
   columns (about 100 rows) let a small box read only the pages it meets.
 
