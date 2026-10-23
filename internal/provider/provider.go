@@ -75,28 +75,38 @@ func (pr *Provider) dataURL(href string) string {
 	return strings.TrimSuffix(pr.Mirror, "/") + u.Path
 }
 
-// Version names everything a render's responses depend on: its catalog entry, data file and
-// Esri renderer.
+// Version names everything a render's responses depend on: its catalog entry, data file,
+// overviews and Esri renderer.
 func (pr *Provider) Version(ctx context.Context, topicID, render string) (string, error) {
 	item, err := pr.Catalog.Topic(ctx, topicID)
 	if err != nil {
 		return "", err
 	}
-	// A small-scale query reads an overview next: open it now rather than after the data file.
-	for _, a := range item.Assets {
-		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
-			go pr.Open(context.WithoutCancel(ctx), a.Href)
-		}
-	}
 	var layer *pq.Layer
 	var d *catalog.Drawing
+	var hrefs []string
+	for _, a := range item.Assets {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
+			hrefs = append(hrefs, a.Href)
+		}
+	}
+	overviews := make([]string, len(hrefs))
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() (err error) { layer, err = pr.Open(gctx, item.Data()); return })
 	g.Go(func() (err error) { d, err = pr.Catalog.Drawing(gctx, item, render); return })
+	for i, href := range hrefs {
+		// An overview that fails to open fails only the queries that read it.
+		g.Go(func() error {
+			if l, err := pr.Open(gctx, href); err == nil {
+				overviews[i] = l.ID()
+			}
+			return nil
+		})
+	}
 	if err := g.Wait(); err != nil {
 		return "", err
 	}
-	return item.Version + "|" + layer.ID() + "|" + d.Version, nil
+	return strings.Join(append([]string{item.Version, layer.ID(), d.Version}, overviews...), "|"), nil
 }
 
 // Open opens a data file, cached like the catalog.
