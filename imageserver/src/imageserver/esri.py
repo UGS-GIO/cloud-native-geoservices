@@ -53,6 +53,7 @@ class Layer:
     width: int
     height: int
     maxzoom: int
+    overviews: list[int] = field(default_factory=list)  # decimation factors
     copyright: str = ""
     version: str = ""  # changes with the item and the COG
     stats: list[dict] = field(default_factory=list)  # per band: min, max, mean, std

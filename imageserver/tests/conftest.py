@@ -23,7 +23,7 @@ def pattern(bands: int, size: int) -> numpy.ndarray:
     return numpy.stack([(x + 7 * b) % 256 for b in range(bands - 1)] + [y % 256]).astype("uint8")
 
 
-def write_cog(path, data, crs, transform, nodata=None, alpha=None):
+def write_cog(path, data, crs, transform, nodata=None, alpha=None, **options):
     profile = {
         "driver": "COG",
         "count": data.shape[0],
@@ -36,6 +36,7 @@ def write_cog(path, data, crs, transform, nodata=None, alpha=None):
         "blocksize": 256,
         "nodata": nodata,
         "overview_resampling": "average",
+        **options,
     }
     if alpha is not None:
         data = numpy.concatenate([data, alpha[None]])
@@ -65,6 +66,11 @@ def data_dir(tmp_path_factory):
     write_cog(
         d / "dem.tif", pattern(2, SIZE)[:1].astype("float32"), "EPSG:3857", from_origin(*ORIGIN, PIXEL, PIXEL)
     )
+    write_cog(d / "flat.tif", rgb, "EPSG:3857", from_origin(*ORIGIN, PIXEL, PIXEL), overviews="NONE")
+    # Columns alternate 0 and 200; the overview keeps every other one, so it is all 0 or all 200.
+    stripes = numpy.broadcast_to(200 * (numpy.arange(2 * SIZE) % 2), (3, 2 * SIZE, 2 * SIZE)).astype("uint8")
+    big = from_origin(*ORIGIN, PIXEL / 2, PIXEL / 2)
+    write_cog(d / "ovr.tif", stripes, "EPSG:3857", big, overview_resampling="nearest")
 
     def item(id, href, key="visual"):
         with rasterio.open(d / href) as ds:
@@ -85,6 +91,8 @@ def data_dir(tmp_path_factory):
             item("nodata", "nodata.tif"),
             item("utm", "utm.tif", key="cog"),
             item("dem", "dem.tif"),
+            item("flat", "flat.tif"),
+            item("ovr", "ovr.tif"),
             {"id": "pdf-only", "assets": {"publication": {"href": "x.pdf", "type": "application/pdf"}}},
         ],
     }

@@ -88,6 +88,11 @@ def matches(if_none_match: str, tag: str) -> bool:
     return "*" in tags or tag in tags
 
 
+def blank(bands: int, h: int, w: int, dtype="uint8") -> numpy.ma.MaskedArray:
+    """Fully masked zeros: masked_all leaves whatever memory held, and the PNG changes with it."""
+    return numpy.ma.array(numpy.zeros((bands, h, w), dtype), mask=True)
+
+
 def not_found(request: Request) -> Response:
     """ArcGIS Server's answer to a tile it does not have."""
     return Response(
@@ -149,6 +154,7 @@ class ImageServerFactory(BaseFactory):
         with Reader(entry.item["assets"][entry.asset]["href"]) as src:
             info = src.info()
             block = src.dataset.block_shapes[0][::-1]
+            overviews = src.dataset.overviews(1)
             compression = src.dataset.tags(ns="IMAGE_STRUCTURE").get("COMPRESSION", "")
         bands = [i for i, ci in enumerate(info.colorinterp or []) if ci != "alpha"] or list(range(info.count))
         names = [
@@ -176,6 +182,7 @@ class ImageServerFactory(BaseFactory):
             width=info.width,
             height=info.height,
             maxzoom=WEB_MERCATOR_QUAD.zoom_for_res(pixel, zoom_level_strategy="upper"),
+            overviews=overviews,
             stats=stats if len(stats) == len(bands) else [],
             copyright=props.get("ugs:author", ""),
             version=hashlib.sha256(f"{entry.version}\0{cog}".encode()).hexdigest()[:16],
@@ -183,6 +190,49 @@ class ImageServerFactory(BaseFactory):
         with self._lock:
             self._layers[id] = (entry.version, cog, now, layer)
         return layer
+
+    def read(self, entry: Entry, layer: Layer, env: dict, box, crs, w: int, h: int, resampling: str):
+        """The w x h image of box, or None where it misses the COG. Only the part of box over the COG
+        is read: rio-tiler warps the whole box at the COG's resolution, terabytes for a world extent."""
+        ext = layer.extent if crs == WEB_MERCATOR else transform_bounds(WEB_MERCATOR, crs, *layer.extent)
+        cut = (max(box[0], ext[0]), max(box[1], ext[1]), min(box[2], ext[2]), min(box[3], ext[3]))
+        if cut[0] >= cut[2] or cut[1] >= cut[3]:
+            return None
+        xres, yres = (box[2] - box[0]) / w, (box[3] - box[1]) / h
+        c0, r0 = round((cut[0] - box[0]) / xres), round((box[3] - cut[3]) / yres)
+        c1, r1 = max(c0 + 1, round((cut[2] - box[0]) / xres)), max(r0 + 1, round((box[3] - cut[1]) / yres))
+        c0, r0, c1, r1 = min(c0, w - 1), min(r0, h - 1), min(c1, w), min(r1, h)
+        # Source pixels GDAL reads: the cut at the coarsest overview no coarser than the output.
+        src = layer.width * layer.height * (cut[2] - cut[0]) * (cut[3] - cut[1])
+        src /= (ext[2] - ext[0]) * (ext[3] - ext[1])
+        out = (c1 - c0) * (r1 - r0)
+        f = max(o for o in (1, *layer.overviews) if o * o <= max(1, src / out))
+        if src / f**2 > max(16 * out, self.max_image**2):
+            raise EsriError(400, "Unable to export image", ["The raster has no overviews for this scale"])
+        with rasterio.Env(**env), self.open(entry) as reader:
+            try:
+                img = reader.part(
+                    cut,
+                    dst_crs=crs,
+                    bounds_crs=crs,
+                    width=c1 - c0,
+                    height=r1 - r0,
+                    assets=[entry.asset],
+                    resampling_method=resampling,
+                    reproject_method=resampling,
+                    **WARP,
+                )
+            except TileOutsideBounds:
+                return None
+        if (c0, r0, c1, r1) == (0, 0, w, h):
+            return img
+        data = blank(img.count, h, w, img.array.dtype)
+        data[:, r0:r1, c0:c1] = img.array
+        alpha = None
+        if img.alpha_mask is not None:
+            alpha = numpy.zeros((h, w), img.alpha_mask.dtype)
+            alpha[r0:r1, c0:c1] = img.alpha_mask
+        return ImageData(data, alpha_mask=alpha, bounds=box, crs=crs)
 
     @staticmethod
     def drawable(layer: Layer):
@@ -274,24 +324,10 @@ class ImageServerFactory(BaseFactory):
                 if not self._exports.acquire(timeout=self.export_wait):
                     raise EsriError(503, "Unable to export image", ["The server is busy, try again"])
                 try:
-                    with rasterio.Env(**env), self.open(entry) as src:
-                        try:
-                            img = src.part(
-                                box,
-                                dst_crs=image_sr,
-                                bounds_crs=image_sr,
-                                width=w,
-                                height=h,
-                                assets=[entry.asset],
-                                resampling_method=resampling,
-                                reproject_method=resampling,
-                                **WARP,
-                            )
-                        except TileOutsideBounds:
-                            img = ImageData(numpy.ma.masked_all((len(layer.band_names), h, w), dtype="uint8"))
-                        except OverflowError:  # a bbox too big for GDAL's integer pixel window
-                            raise EsriError(400, "Unable to export image", ["Invalid bbox"])
-                        return self.render_func(img, output_format=output, add_mask=fmt != "jpg", **options)
+                    img = self.read(entry, layer, env, box, image_sr, w, h, resampling)
+                    if img is None:
+                        img = ImageData(blank(len(layer.band_names), h, w))
+                    return self.render_func(img, output_format=output, add_mask=fmt != "jpg", **options)
                 finally:
                     self._exports.release()
 
@@ -352,20 +388,10 @@ class ImageServerFactory(BaseFactory):
                 return not_found(request)
 
             def draw():
-                with rasterio.Env(**env), self.open(entry) as src:
-                    try:
-                        img = src.tile(
-                            col,
-                            row,
-                            level,
-                            tilesize=256,
-                            assets=[entry.asset],
-                            resampling_method="bilinear",
-                            reproject_method="bilinear",
-                            **WARP,
-                        )
-                    except TileOutsideBounds:
-                        return not_found(request)
+                box = WEB_MERCATOR_QUAD.xy_bounds(col, row, level)
+                img = self.read(entry, layer, env, box, WEB_MERCATOR, 256, 256, "bilinear")
+                if img is None:
+                    return not_found(request)
                 return self.render_func(img, output_format=None, quality=75)
 
             return self.answer(request, layer, {}, draw)

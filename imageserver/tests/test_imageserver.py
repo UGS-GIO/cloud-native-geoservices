@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import rio_tiler.reader
 from conftest import ORIGIN, PIXEL, SIZE, decode
 from fastapi.testclient import TestClient
 
@@ -28,7 +29,7 @@ def export(client, layer="rgba", **params):
 
 def test_root_lists_cog_items(client):
     services = client.get("/").json()["services"]
-    assert [s["id"] for s in services] == ["rgba", "nodata", "utm", "dem"]
+    assert [s["id"] for s in services] == ["rgba", "nodata", "utm", "dem", "flat", "ovr"]
     assert services[0]["url"].endswith("/ugs/rest/services/rgba/ImageServer")
 
 
@@ -129,12 +130,72 @@ def test_export_errors(client, params, detail):
     assert err["code"] == 400 and err["details"] == [detail]
 
 
+def test_export_huge_bbox(client):
+    assert export(client, bbox="-1e10,-1e10,1e10,1e10", bboxSR="4326").json()["error"]["details"] == [
+        "Invalid bbox"
+    ]
+
+
+def within(seconds, fn, *args, **kwargs):
+    """fn's result, or a failure once it runs longer than seconds (a GDAL read can't be interrupted)."""
+    out = []
+    t = threading.Thread(target=lambda: out.append(fn(*args, **kwargs)), daemon=True)
+    t.start()
+    t.join(seconds)
+    assert out, f"no answer in {seconds} s"
+    return out[0]
+
+
+@pytest.fixture
+def vrt_pixels(monkeypatch):
+    """The size of each warped VRT rio-tiler opens."""
+    sizes, real = [], rio_tiler.reader.WarpedVRT
+
+    def spy(src, **kw):
+        sizes.append(kw.get("width", src.width) * kw.get("height", src.height))
+        return real(src, **kw)
+
+    monkeypatch.setattr(rio_tiler.reader, "WarpedVRT", spy)
+    return sizes
+
+
+@pytest.mark.parametrize("layer", ["nodata", "flat"])
 @pytest.mark.parametrize(
-    "params",
-    [{"bbox": "-1e30,-1e30,1e30,1e30"}, {"bbox": "-1e10,-1e10,1e10,1e10", "bboxSR": "4326"}],
+    "path, params",
+    [
+        ("exportImage", {"bbox": "-180,-90,180,90", "bboxSR": "4326", "size": "400,400"}),
+        ("exportImage", {"bbox": "-1e30,-1e30,1e30,1e30", "size": "400,400"}),
+        ("tile/0/0/0", {}),
+    ],
 )
-def test_export_huge_bbox(client, params):
-    assert export(client, **params).json()["error"]["details"] == ["Invalid bbox"]
+def test_world_reads_only_the_cog(client, vrt_pixels, layer, path, params):
+    p = {"f": "image", "format": "png", **params}
+    res = within(2, client.get, f"{S}/{layer}/ImageServer/{path}", params=p)
+    assert res.status_code == 200
+    assert decode(res.content).shape[1:] == ((400, 400) if params else (256, 256))
+    assert max(vrt_pixels, default=0) <= SIZE * SIZE
+    assert client.get(f"{S}/{layer}/ImageServer/{path}", params=p).content == res.content
+
+
+def test_read_past_the_edge_uses_overviews(client):
+    # A box past ovr.tif's edges at 1/8 its resolution: the full resolution averages its stripes.
+    m = 256
+    res = within(2, export, client, "ovr", bbox=f"{X0 - m},{Y0 - m},{X1 + m},{Y1 + m}", size="192,192")
+    a = decode(res.content)
+    assert a[0, 96, 96] in (0, 200) and a[3, 0, 0] == 0
+
+
+def test_no_overviews_caps_the_read(data_dir, monkeypatch):
+    monkeypatch.setenv("STAC_COLLECTION_URL", str(data_dir / "items.json"))
+    monkeypatch.setenv("MAX_IMAGE_SIZE", "64")
+    from imageserver.main import create_app
+
+    c = TestClient(create_app())
+    for params in ({}, {"bbox": "-180,-90,180,90", "bboxSR": "4326"}):
+        err = within(2, export, c, "flat", **params).json()["error"]
+        assert err["details"] == ["The raster has no overviews for this scale"]
+    assert export(c, "nodata").headers["content-type"] == "image/png"
+    assert export(c, "flat", size="64,64", bbox=f"{X0},{Y1 - 256},{X0 + 256},{Y1}").status_code == 200
 
 
 def test_size_limit_in_service(client):
