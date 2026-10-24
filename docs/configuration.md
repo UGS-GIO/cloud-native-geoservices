@@ -20,6 +20,7 @@ Set one. See [Layer sources](layer-sources.md).
 | `PORT` | `8080` | Listen port |
 | `PUBLIC_URL` | request host | Base of the layer URLs that `/` lists, for example `https://features.example.com`. Without it, the server uses the request's `Host` header and `X-Forwarded-Proto`. |
 | `CACHE_TTL` | `300` | Seconds. How often the server reads the layer source again and checks each file version. Also the `max-age` and `stale-while-revalidate` of `Cache-Control`. |
+| `CDN_TTL` | `CACHE_TTL` | Seconds. The `s-maxage` of `Cache-Control`: how long a CDN keeps a response before it revalidates it with the ETag. |
 | `COMPRESSION` | `gzip` | Content codings that the server offers, most preferred first. A comma list of `gzip`, `br` and `zstd`. An unknown name stops the server at start. See [Compression](performance.md#compression). |
 | `LOG_LEVEL` | `warn` | `debug`, `info`, `warn` or `error`. `debug` logs every range request. An unknown name stays at `warn`. |
 | `PPROF_ADDR` | | Address for the Go `net/http/pprof` handlers, for example `localhost:6060`. Off when unset. |

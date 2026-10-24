@@ -169,7 +169,7 @@ func TestETag(t *testing.T) {
 	u := ts.URL + "/ugs/rest/services/geolunits/default/FeatureServer/0/query?f=json&where=1=1&resultRecordCount=3"
 	res, _ := get(t, u)
 	tag := res.Header.Get("ETag")
-	if !strings.HasPrefix(tag, `"`) || !strings.Contains(res.Header.Get("Cache-Control"), "stale-while-revalidate=300") {
+	if !strings.HasPrefix(tag, `"`) || !strings.Contains(res.Header.Get("Cache-Control"), "max-age=300, s-maxage=300, stale-while-revalidate=300") {
 		t.Fatalf("headers %v", res.Header)
 	}
 	again, _ := get(t, u)

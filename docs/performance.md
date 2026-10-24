@@ -82,7 +82,7 @@ The response cache keeps each encoded response, compressed, by its ETag. A repea
 answered from the cache before the server parses the parameters or reads any data.
 
 GET and HEAD responses have
-`Cache-Control: public, max-age={CACHE_TTL}, stale-while-revalidate={CACHE_TTL}` and
+`Cache-Control: public, max-age={CACHE_TTL}, s-maxage={CDN_TTL}, stale-while-revalidate={CACHE_TTL}` and
 `Vary: Accept-Encoding`. Errors have `Cache-Control: no-store`.
 
 ## Compression

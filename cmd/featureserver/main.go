@@ -155,6 +155,7 @@ func main() {
 		MaxLight:     int(envInt("MAX_LIGHT", int64(16*runtime.GOMAXPROCS(0)))),
 		MaxInFlight:  int(maxInFlight),
 	}, budget("RESPONSE_CACHE_MB", 256, 0.0625, limit), log)
+	srv.CDNTTL = int(envInt("CDN_TTL", ttl))
 	if err := srv.Compress(env("COMPRESSION", "gzip")); err != nil {
 		log.Error("COMPRESSION", "err", err)
 		os.Exit(2)
