@@ -262,7 +262,7 @@ These are the main differences from an ArcGIS Online hosted layer:
 - There is no support for `having`, `returnZ`, `returnM`, attachments, related records or edits.
 
 The [conformance suite](conformance.md) records every difference that it finds in
-[`known_gaps.json`](https://github.com/UGS-GIO/geoparquet-featureserver/blob/main/testdata/conformance/known_gaps.json)
+[`known_gaps.json`](https://github.com/UGS-GIO/cloud-native-geoservices/blob/main/testdata/conformance/known_gaps.json)
 and
-[`known_gaps_large.json`](https://github.com/UGS-GIO/geoparquet-featureserver/blob/main/testdata/conformance/known_gaps_large.json),
+[`known_gaps_large.json`](https://github.com/UGS-GIO/cloud-native-geoservices/blob/main/testdata/conformance/known_gaps_large.json),
 each with a reason.

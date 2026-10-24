@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/conformance"
+	"github.com/UGS-GIO/cloud-native-geoservices/conformance"
 )
 
 // client is polite to public servers: one request at a time, a pause between requests, and
@@ -32,7 +32,7 @@ type client struct {
 	last time.Time
 }
 
-const userAgent = "geoparquet-featureserver-conformance (+https://github.com/UGS-GIO/geoparquet-featureserver)"
+const userAgent = "cloud-native-geoservices-conformance (+https://github.com/UGS-GIO/cloud-native-geoservices)"
 
 func (c *client) do(ctx context.Context, method, u string, params url.Values) (int, string, []byte, time.Duration, error) {
 	var err error

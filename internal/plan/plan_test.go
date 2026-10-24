@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
 )
 
 var layer = Layer{Columns: []pq.Column{{Name: "feature_id"}, {Name: "acres"}, {Name: "wetland_type"}, {Name: "count"}}, BBox: true}

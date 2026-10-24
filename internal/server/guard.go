@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/plan"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/plan"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/query"
 )
 
 var (

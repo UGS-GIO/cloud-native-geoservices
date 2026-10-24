@@ -14,9 +14,9 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
 )
 
 // Kind is what a request needs from the file.

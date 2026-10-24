@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 func TestScaleRange(t *testing.T) {

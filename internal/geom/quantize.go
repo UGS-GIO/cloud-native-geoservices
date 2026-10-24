@@ -6,7 +6,7 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 // Transform is a quantization grid: whole steps of the scale from the translate. Upper-left

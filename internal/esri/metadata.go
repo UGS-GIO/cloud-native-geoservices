@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
 )
 
 //go:embed defaults/server.json

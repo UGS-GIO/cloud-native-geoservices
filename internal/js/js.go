@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 // ParseNumber is Number(s) for a string: trimmed, "" is 0, 0x hex, Infinity; NaN otherwise.

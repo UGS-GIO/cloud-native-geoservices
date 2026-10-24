@@ -6,16 +6,16 @@ The server needs Go 1.26.3 or later to build (the version in `go.mod`). Every me
 `@latest` is the newest release.
 
 ```bash
-go install github.com/UGS-GIO/geoparquet-featureserver@latest
+go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest
 ```
 
 You can also build a Docker image from the repository. The image is a static binary on
 distroless, with no shell.
 
 ```bash
-git clone https://github.com/UGS-GIO/geoparquet-featureserver
-cd geoparquet-featureserver
-docker build -t geoparquet-featureserver .
+git clone https://github.com/UGS-GIO/cloud-native-geoservices
+cd cloud-native-geoservices
+docker build -t featureserver .
 ```
 
 ## Serve a folder
@@ -25,13 +25,13 @@ without the extension is the layer id. The files must meet the
 [data requirements](layer-sources.md#data-requirements).
 
 ```bash
-LAYERS_DIR=./data geoparquet-featureserver
+LAYERS_DIR=./data featureserver
 ```
 
 With Docker, mount the folder read-only:
 
 ```bash
-docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data geoparquet-featureserver
+docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data featureserver
 ```
 
 Open `http://localhost:8080/`. It lists each layer with its URL. A layer URL has this form:

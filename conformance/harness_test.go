@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/server"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/catalog"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/provider"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/server"
 )
 
 // recorded is a layer's recording and what its layer description says.

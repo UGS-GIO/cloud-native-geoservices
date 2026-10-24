@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 type aggregate struct {

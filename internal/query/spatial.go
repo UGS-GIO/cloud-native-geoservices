@@ -5,8 +5,8 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
 )
 
 // Spatial is a request's geometry filter: the query geometry, prepared, and its spatialRel. With

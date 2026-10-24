@@ -3,7 +3,7 @@ package query
 import (
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
 )
 
 // Transform is the grid q puts an answer in sr on, given the layer's lon/lat extent; nil when q

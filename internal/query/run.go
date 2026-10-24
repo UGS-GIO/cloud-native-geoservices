@@ -9,12 +9,12 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/where"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/where"
 )
 
 // Response is a query result: what to write as JSON, and what PBF encodes when f=pbf.

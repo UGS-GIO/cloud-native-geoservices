@@ -18,14 +18,14 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/plan"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/remote"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/catalog"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/plan"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/query"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/remote"
 )
 
 const unlimited = int64(1) << 50

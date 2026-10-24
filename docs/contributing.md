@@ -61,7 +61,7 @@ While the version is below 1.0:
 | `feat` | Minor, for example 0.2.0 to 0.3.0 |
 | Any other type | Patch, for example 0.2.0 to 0.2.1 |
 
-Users install a release with `go install github.com/UGS-GIO/geoparquet-featureserver@latest`, or
+Users install a release with `go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest`, or
 with `@vX.Y.Z` for a fixed version.
 
 ## Documentation

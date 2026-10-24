@@ -7,9 +7,9 @@ import (
 
 	"github.com/paulmach/orb"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
 )
 
 func collection() *Collection {

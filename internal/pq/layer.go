@@ -20,7 +20,7 @@ import (
 	"github.com/parquet-go/parquet-go/deprecated"
 	"github.com/parquet-go/parquet-go/format"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/remote"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/remote"
 )
 
 // Our GeoParquet columns that are not attributes: the covering and the source CRS.

@@ -1,6 +1,6 @@
-# geoparquet-featureserver
+# cloud-native-geoservices
 
-geoparquet-featureserver serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online
+The `featureserver` command serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online
 Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add each layer by URL.
 
 It is one Go binary. It reads the files in place, from a local disk or with HTTP range requests
@@ -19,7 +19,7 @@ to a web server, CDN or bucket. There is no database to run and no copy of the d
 
 ```mermaid
 flowchart LR
-  C[ArcGIS client] -->|/query| S[geoparquet-featureserver]
+  C[ArcGIS client] -->|/query| S[featureserver]
   S -->|catalog every CACHE_TTL| L[Layer source:<br>folder, config or STAC]
   S -->|HTTP range reads| P[(GeoParquet files)]
   S -->|Esri JSON, GeoJSON or PBF| C
@@ -36,8 +36,8 @@ flowchart LR
 Serve a folder of GeoParquet files. Each `*.parquet` file becomes a layer.
 
 ```bash
-go install github.com/UGS-GIO/geoparquet-featureserver@latest
-LAYERS_DIR=./data geoparquet-featureserver
+go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest
+LAYERS_DIR=./data featureserver
 ```
 
 Open `http://localhost:8080/`. The page lists each layer and its URL:

@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
 )
 
 // Params are the request parameters: body then query (query wins), empty strings dropped,
