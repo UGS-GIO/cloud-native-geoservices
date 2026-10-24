@@ -58,54 +58,6 @@ func BoxToLonLat(x, y float64) (float64, float64) {
 	return p[0], p[1]
 }
 
-// Projected is a copy of g with f applied to every point; g is not changed.
-func Projected(g orb.Geometry, f func(orb.Point) orb.Point) orb.Geometry {
-	switch g := g.(type) {
-	case orb.Point:
-		return f(g)
-	case orb.MultiPoint:
-		return orb.MultiPoint(mapped(g, f))
-	case orb.LineString:
-		return orb.LineString(mapped(g, f))
-	case orb.Ring:
-		return orb.Ring(mapped(g, f))
-	case orb.MultiLineString:
-		out := make(orb.MultiLineString, len(g))
-		for i, l := range g {
-			out[i] = mapped(l, f)
-		}
-		return out
-	case orb.Polygon:
-		return projectedPolygon(g, f)
-	case orb.MultiPolygon:
-		out := make(orb.MultiPolygon, len(g))
-		for i, p := range g {
-			out[i] = projectedPolygon(p, f)
-		}
-		return out
-	}
-	return project.Geometry(orb.Clone(g), f)
-}
-
-func projectedPolygon(p orb.Polygon, f func(orb.Point) orb.Point) orb.Polygon {
-	out := make(orb.Polygon, len(p))
-	for i, r := range p {
-		out[i] = mapped(r, f)
-	}
-	return out
-}
-
-func mapped(ps []orb.Point, f func(orb.Point) orb.Point) []orb.Point {
-	if ps == nil {
-		return nil
-	}
-	out := make([]orb.Point, len(ps))
-	for i, p := range ps {
-		out[i] = f(p)
-	}
-	return out
-}
-
 // Bounds covers every coordinate of g, holes included (orb's Polygon.Bound uses the outer ring).
 func Bounds(g orb.Geometry) orb.Bound {
 	b := orb.Bound{Min: orb.Point{math.Inf(1), math.Inf(1)}, Max: orb.Point{math.Inf(-1), math.Inf(-1)}}
