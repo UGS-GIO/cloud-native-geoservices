@@ -14,11 +14,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pbf"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/catalog"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pbf"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/provider"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/query"
 )
 
 const jsonType = "application/json; charset=utf-8"

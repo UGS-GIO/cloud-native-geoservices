@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 // FieldType is the Esri field type for a provider type.

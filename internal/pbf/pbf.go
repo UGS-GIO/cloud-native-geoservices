@@ -9,11 +9,11 @@ import (
 
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/query"
 )
 
 // transform is the response's quantization, or the default for its spatial reference.

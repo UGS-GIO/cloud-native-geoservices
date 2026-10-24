@@ -1,4 +1,4 @@
-// geoparquet-featureserver serves GeoParquet files as ArcGIS FeatureServer layers (README.md).
+// featureserver serves GeoParquet files as ArcGIS FeatureServer layers (README.md).
 package main
 
 import (
@@ -22,12 +22,12 @@ import (
 	"golang.org/x/net/netutil"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/catalog"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/geom"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/pq"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/remote"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/server"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/catalog"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/pq"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/provider"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/remote"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/server"
 )
 
 func env(key, def string) string {

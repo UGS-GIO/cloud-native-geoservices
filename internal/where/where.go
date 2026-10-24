@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
 )
 
 type expr interface {

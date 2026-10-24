@@ -9,13 +9,13 @@ The `Dockerfile` builds a static binary and copies it onto
 `gcr.io/distroless/static-debian12:nonroot`. The image has no shell and runs as a non-root user.
 
 ```bash
-docker build -t geoparquet-featureserver .
+docker build -t featureserver .
 ```
 
 Serve a local folder:
 
 ```bash
-docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data geoparquet-featureserver
+docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data featureserver
 ```
 
 Serve files over HTTPS with a STAC ItemCollection:
@@ -24,7 +24,7 @@ Serve files over HTTPS with a STAC ItemCollection:
 docker run -p 8080:8080 \
   -e STAC_COLLECTION_URL=https://example.com/stac/items.json \
   -e PUBLIC_URL=https://features.example.com \
-  geoparquet-featureserver
+  featureserver
 ```
 
 Set a memory limit on the container (`--memory`). The server sizes its caches from it. See
@@ -38,12 +38,12 @@ you set. The server reads `PORT` from the environment, which Cloud Run sets.
 Build and push the image to a registry that Cloud Run can read, then deploy it:
 
 ```bash
-IMAGE=REGION-docker.pkg.dev/PROJECT/REPOSITORY/geoparquet-featureserver
+IMAGE=REGION-docker.pkg.dev/PROJECT/REPOSITORY/featureserver
 
 docker build -t "$IMAGE" .
 docker push "$IMAGE"
 
-gcloud run deploy geoparquet-featureserver \
+gcloud run deploy featureserver \
   --image "$IMAGE" \
   --region REGION \
   --memory 2Gi \

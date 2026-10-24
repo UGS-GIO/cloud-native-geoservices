@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/js"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/where"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/js"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/where"
 )
 
 // sorted orders feature indexes by orderByFields as SQL does: nulls first ascending and last

@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/esri"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/jsonx"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/lru"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/provider"
-	"github.com/UGS-GIO/geoparquet-featureserver/internal/query"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/jsonx"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/lru"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/provider"
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/query"
 )
 
 // Limits protect a public endpoint.

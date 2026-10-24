@@ -1,8 +1,11 @@
-# geoparquet-featureserver
+# cloud-native-geoservices
 
-Serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online Map Viewer, Experience
-Builder, StoryMaps and ArcGIS Pro can add them by URL. It is one Go binary. It reads the files in
-place, from local disk or with HTTP range requests, and has no database and no data copy.
+Esri GeoServices REST APIs over cloud-native files, by the Utah Geological Survey.
+
+The `featureserver` command serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online
+Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add them by URL. It is one Go binary.
+It reads the files in place, from local disk or with HTTP range requests, and has no database and
+no data copy.
 
 Each request reads only the row groups, pages and columns it needs. Row groups are pruned on the
 statistics of the GeoParquet bbox covering columns, and inside a row group the bbox columns pick
@@ -13,21 +16,21 @@ the rows.
 A folder of GeoParquet files, one layer per file:
 
 ```bash
-LAYERS_DIR=./data go run .
-docker build -t geoparquet-featureserver .
-docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data geoparquet-featureserver
+LAYERS_DIR=./data go run ./cmd/featureserver
+docker build -t featureserver .
+docker run -p 8080:8080 -v "$PWD/data:/data:ro" -e LAYERS_DIR=/data featureserver
 ```
 
 Or install a release, a tagged version cut on every merge to main:
 
 ```bash
-go install github.com/UGS-GIO/geoparquet-featureserver@latest
+go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest
 ```
 
 A STAC ItemCollection (`items.json`), local or over https:
 
 ```bash
-STAC_COLLECTION_URL=https://example.com/stac/items.json go run .
+STAC_COLLECTION_URL=https://example.com/stac/items.json go run ./cmd/featureserver
 ```
 
 Then open `http://localhost:8080/`. It lists each layer and its URL:
