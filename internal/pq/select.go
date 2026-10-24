@@ -80,6 +80,13 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 		if rows, err = l.inBox(ctx, s.Box); err != nil {
 			return nil, err
 		}
+	case s.Box != nil:
+		// Without a covering, the row groups whose geospatial statistics may meet the box.
+		for _, g := range l.Groups {
+			for r := g.Start; overlaps(g, s.Box) && r < g.Start+g.Rows; r++ {
+				rows = append(rows, r)
+			}
+		}
 	case s.Page != nil:
 		end := min(l.Rows, s.Page.Offset+s.Page.Limit+1) // one extra: is there more?
 		for r := s.Page.Offset; r < end; r++ {

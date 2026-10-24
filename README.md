@@ -8,8 +8,8 @@ It reads the files in place, from local disk or with HTTP range requests, and ha
 no data copy.
 
 Each request reads only the row groups, pages and columns it needs. Row groups are pruned on the
-statistics of the GeoParquet bbox covering columns, and inside a row group the bbox columns pick
-the rows.
+statistics of the GeoParquet bbox covering columns, or of a native `GEOMETRY` column without
+them, and inside a row group the bbox columns pick the rows.
 
 ## Quickstart
 
@@ -82,11 +82,12 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 
 ## Data requirements
 
-- GeoParquet 1.x with WKB geometry in EPSG:4326.
+- GeoParquet 1.x or 2.0 with WKB geometry in EPSG:4326.
 - An integer `feature_id` column. It is the object id. Queries by `objectIds` need it.
 - Recommended: the bbox covering columns (`bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`),
   rows sorted spatially (for example Hilbert order), small row groups, and a page index. Without
-  the covering, a spatial filter reads the geometry of every row. With the page index, a small
+  the covering, a spatial filter reads the geometry of every row in the row groups that the
+  native geospatial statistics, if any, do not rule out. With the page index, a small
   box reads only the bbox pages it meets, so small pages on those columns help.
 
 ## Environment

@@ -131,23 +131,27 @@ tolerance is about one pixel, `round(log2(1.40625 / tolerance))`, so tolerances 
 
 ## Data requirements
 
-Each file must be GeoParquet 1.x with these properties:
+Each file must be GeoParquet 1.x or 2.0 with these properties:
 
-- WKB geometry in EPSG:4326. The geometry column is the `primary_column` in the `geo` metadata,
-  or `geom` if that is not set.
+- WKB geometry in EPSG:4326 (OGC:CRS84). The geometry column is the `primary_column` in the `geo`
+  metadata. Without one, it is the first column of the Parquet `GEOMETRY` or `GEOGRAPHY` type, or
+  else `geom`.
 - An integer `feature_id` column. It is the object id. Queries by `objectIds` need it.
 - Rows in `feature_id` order. The server pages by row number when there is no `where` filter, so
   a page of rows must be a page of features.
 
 The geometry type comes from the first entry of `geometry_types` in the `geo` metadata. A type
 that contains `Point` gives a point layer, a type that contains `LineString` gives a polyline
-layer, and anything else gives a polygon layer. Each file is one geometry type.
+layer, and anything else gives a polygon layer. Without `geometry_types`, the type comes from the
+geospatial statistics of the first row group. Each file is one geometry type.
 
 These are recommended:
 
 - The bbox covering as four flat columns: `bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`.
-  Without them, a spatial filter reads the geometry of every row, and the layer extent is not
-  known.
+  Without them, the layer extent is not known, and a spatial filter reads the geometry of every
+  row in the row groups it meets. Row groups are then pruned on the geospatial statistics of a
+  `GEOMETRY` or `GEOGRAPHY` column, if the file has them. A row group without them is always
+  read, and a `GEOGRAPHY` box across the antimeridian prunes on latitude only.
 - Rows sorted spatially, for example in Hilbert order, with `feature_id` assigned in that order.
 - `feature_id` equal to the row number plus 1. Then the server finds an object id without reading
   the `feature_id` column. Otherwise it reads `feature_id` in the row groups whose statistics may
