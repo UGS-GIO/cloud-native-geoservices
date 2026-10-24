@@ -14,7 +14,6 @@ from rasterio.errors import CRSError
 
 DEFAULTS = json.loads(resources.files(__package__).joinpath("defaults/service.json").read_text())
 WEB_MERCATOR = CRS.from_epsg(3857)
-WGS84 = CRS.from_epsg(4326)
 # Esri's own codes for Web Mercator.
 MERCATOR_WKIDS = {3857, 102100, 102113, 900913, 3785}
 
@@ -105,8 +104,8 @@ def parse_bbox(value: str | None) -> tuple[float, float, float, float]:
             d = json.loads(value)
             box = (d["xmin"], d["ymin"], d["xmax"], d["ymax"])
         else:
-            box = tuple(float(p) for p in value.split(","))
-        xmin, ymin, xmax, ymax = (float(x) for x in box)
+            box = value.split(",")
+        xmin, ymin, xmax, ymax = map(float, box)
     except (ValueError, KeyError, TypeError):
         raise EsriError(400, "Unable to export image", ["Invalid bbox"])
     if not all(map(math.isfinite, (xmin, ymin, xmax, ymax))) or xmax <= xmin or ymax <= ymin:
@@ -118,7 +117,7 @@ def parse_size(value: str | None, limit: int) -> tuple[int, int]:
     try:
         w, h = (int(float(p)) for p in (value or "400,400").split(","))
     except (ValueError, OverflowError):
-        raise EsriError(400, "Unable to export image", ["Invalid size"])
+        w = h = 0
     if w <= 0 or h <= 0:
         raise EsriError(400, "Unable to export image", ["Invalid size"])
     if w > limit or h > limit:
