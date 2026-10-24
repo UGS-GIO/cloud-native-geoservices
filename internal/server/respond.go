@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -82,10 +83,25 @@ func encodeQuery(p query.Params, res *query.Response) (*encoded, error) {
 	return &encoded{body: body, contentType: "application/x-protobuf", pbf: true}, nil
 }
 
-// etag is a strong validator for a response: the data version plus the normalized request.
+// build names this binary: a new release can answer the same request differently.
+var build = func() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	s := bi.Main.Version
+	for _, kv := range bi.Settings {
+		if kv.Key == "vcs.revision" || kv.Key == "vcs.modified" {
+			s += " " + kv.Value
+		}
+	}
+	return s
+}()
+
+// etag is a strong validator for a response: the build, the data version and the normalized request.
 func etag(version string, r *http.Request) string {
 	h := sha256.New()
-	fmt.Fprint(h, version, "\x00", r.URL.Path, "\x00", r.URL.Query().Encode(), "\x00")
+	fmt.Fprint(h, build, "\x00", version, "\x00", r.URL.Path, "\x00", r.URL.Query().Encode(), "\x00")
 	if r.PostForm != nil {
 		h.Write([]byte(r.PostForm.Encode()))
 	}
