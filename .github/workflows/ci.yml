@@ -20,3 +20,17 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
       - run: go build ./...
+
+  imageserver:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: imageserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src tests scripts
+      - run: uv run ruff format --check src tests scripts
+      - run: uv run pytest -q
+      - run: docker build -f imageserver/Dockerfile -t imageserver ..
