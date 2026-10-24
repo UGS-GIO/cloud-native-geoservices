@@ -1,2 +1,4 @@
 *.prof
 featureserver
+**/.venv
+**/__pycache__

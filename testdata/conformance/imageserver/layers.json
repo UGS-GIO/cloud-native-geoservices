@@ -1,0 +1,8 @@
+{"layers": [
+ {"name": "toronto", "url": "https://sampleserver6.arcgisonline.com/arcgis/rest/services/Toronto/ImageServer",
+  "license": "Esri sample server; GeoEye IKONOS scene", "vars": {"env": "-79.405,43.640,-79.385,43.655", "z": "15"}},
+ {"name": "mtbaldy", "url": "https://sampleserver6.arcgisonline.com/arcgis/rest/services/Elevation/MtBaldy_Elevation/ImageServer",
+  "license": "Esri sample server", "vars": {"env": "-117.50,34.28,-117.42,34.36", "z": "13"}},
+ {"name": "naip", "url": "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer",
+  "license": "USDA NAIP via USGS The National Map: US government work, public domain", "vars": {"env": "-111.900,40.750,-111.880,40.770", "z": "16"}}
+]}

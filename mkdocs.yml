@@ -32,6 +32,7 @@ nav:
       - Layer sources: layer-sources.md
       - Configuration: configuration.md
       - Querying: querying.md
+      - ImageServer: imageserver.md
   - Operations:
       - Performance: performance.md
       - Deployment: deployment.md

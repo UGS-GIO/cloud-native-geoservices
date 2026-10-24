@@ -11,6 +11,10 @@ Each request reads only the row groups, pages and columns it needs. Row groups a
 statistics of the GeoParquet bbox covering columns, or of a native `GEOMETRY` or `GEOGRAPHY`
 column without them, and inside a row group the bbox columns pick the rows.
 
+The `imageserver/` service serves Cloud Optimized GeoTIFFs listed in STAC as ArcGIS ImageServers.
+It is a Python service on titiler and rio-tiler, with its own image. See
+[docs/imageserver.md](docs/imageserver.md).
+
 ## Quickstart
 
 A folder of GeoParquet files, one layer per file:
