@@ -63,6 +63,42 @@ func TestSelectAndRead(t *testing.T) {
 	}
 }
 
+func TestIDsWhenIDsAreNotRowNumbers(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, "qfaults.parquet")
+	l.IDIsRow = false
+	ids, err := l.Select(ctx, Selection{IDs: []int64{300, 1, 150, 999}})
+	if err != nil || !slices.Equal(ids, []int64{0, 149, 299}) {
+		t.Errorf("ids %v %v", ids, err)
+	}
+	l.Groups[1].IDMin, l.Groups[1].IDMax = math.NaN(), math.NaN() // no statistics: read the group
+	if ids, _ := l.Select(ctx, Selection{IDs: []int64{150}}); !slices.Equal(ids, []int64{149}) {
+		t.Errorf("group without statistics %v", ids)
+	}
+	if ids, _ := l.Select(ctx, Selection{IDs: []int64{999}}); len(ids) != 0 {
+		t.Errorf("an id outside every group %v", ids)
+	}
+}
+
+func TestUnsignedIDStatistics(t *testing.T) {
+	type row struct {
+		ID uint32 `parquet:"feature_id"`
+	}
+	path := filepath.Join(t.TempDir(), "uint.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f)
+	w.Write([]row{{5}, {3_000_000_000}})
+	w.Close()
+	f.Close()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids, _ := l.Select(context.Background(), Selection{IDs: []int64{3_000_000_000}}); !slices.Equal(ids, []int64{1}) {
+		t.Errorf("an id above int32 in a uint32 column %v", ids)
+	}
+}
+
 func TestAppendKey(t *testing.T) {
 	key := func(v *Values, i int) (string, bool) {
 		b, ok := v.AppendKey(nil, i, '|')

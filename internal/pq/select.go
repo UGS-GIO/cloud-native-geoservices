@@ -44,12 +44,32 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 			for _, id := range s.IDs {
 				want[id] = true
 			}
-			all := l.AllRows()
-			got, err := l.Read(ctx, []string{"feature_id"}, all)
+			// Read feature_id only in the row groups whose statistics may hold a wanted id.
+			sorted := slices.Sorted(slices.Values(s.IDs))
+			var cand []int64
+			for _, g := range l.Groups {
+				// The first id not below the group's minimum (all of them when it has none).
+				i, _ := slices.BinarySearchFunc(sorted, g.IDMin, func(id int64, lo float64) int {
+					if float64(id) < lo {
+						return -1
+					}
+					return 1
+				})
+				if i == len(sorted) || float64(sorted[i]) > g.IDMax {
+					continue
+				}
+				for r := g.Start; r < g.Start+g.Rows; r++ {
+					cand = append(cand, r)
+				}
+			}
+			if len(cand) == 0 {
+				break
+			}
+			got, err := l.Read(ctx, []string{"feature_id"}, cand)
 			if err != nil {
 				return nil, err
 			}
-			for i, r := range all {
+			for i, r := range cand {
 				if id, ok := got.Get(0, i).(int64); ok && want[id] {
 					rows = append(rows, r)
 				}
@@ -68,7 +88,7 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 	default:
 		rows = l.AllRows()
 	}
-	if s.Box != nil && len(s.IDs) > 0 && l.HasBBox {
+	if s.Box != nil && len(s.IDs) > 0 && l.HasBBox && len(rows) > 0 {
 		// Both filters: keep the id rows the box prefilter keeps.
 		inBox, err := l.Select(ctx, Selection{Box: s.Box})
 		if err != nil {
