@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
         cache_ttl=ttl,
         max_image=int(os.environ.get("MAX_IMAGE_SIZE", "2048")),
         max_exports=int(os.environ.get("MAX_EXPORTS", "1")),
+        export_wait=float(os.environ.get("EXPORT_WAIT", "10")),
     )
     public_url = os.environ.get("PUBLIC_URL", "").rstrip("/")
 

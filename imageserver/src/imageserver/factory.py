@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import pathlib
 import threading
 import time
 from collections.abc import Callable
@@ -31,14 +32,29 @@ from . import esri
 from .catalog import Catalog, Entry
 from .esri import WEB_MERCATOR, EsriError, Layer
 
+DEPENDENCIES = ("titiler.core", "rio-tiler", "rasterio")
 
-def _build() -> str:
-    """This release and commit: a new one can answer the same request differently."""
+
+def _version(dist: str) -> str:
     try:
-        v = version("imageserver")
+        return version(dist)
     except PackageNotFoundError:
-        v = ""
-    return f"{v} {os.environ.get('GIT_SHA', '')}".strip()
+        return ""
+
+
+def _build(
+    root: pathlib.Path = pathlib.Path(__file__).parent, version: Callable[[str], str] = _version
+) -> str:
+    """The commit, or a hash of this package's files and its readers' versions: a new build can
+    answer the same request differently."""
+    if sha := os.environ.get("GIT_SHA"):
+        return sha
+    h = hashlib.sha256()
+    for f in sorted(root.rglob("*")):
+        if f.is_file() and "__pycache__" not in f.parts:
+            h.update(f"{f.relative_to(root)}\0".encode() + f.read_bytes())
+    h.update(json.dumps([version(d) for d in DEPENDENCIES]).encode())
+    return h.hexdigest()[:16]
 
 
 BUILD = _build()
@@ -93,9 +109,10 @@ class ImageServerFactory(BaseFactory):
     max_image: int = 2048
     cache_ttl: int = 300
     max_exports: int = 1
+    export_wait: float = 10
     _layers: dict = field(factory=dict, init=False)
     _lock: threading.Lock = field(factory=threading.Lock, init=False)
-    # Big exports take most of the memory: this many render at once, the rest wait.
+    # Big exports take most of the memory: this many render at once, the rest wait export_wait.
     _exports: threading.Semaphore = field(
         init=False, default=Factory(lambda self: threading.Semaphore(self.max_exports), takes_self=True)
     )
@@ -111,6 +128,7 @@ class ImageServerFactory(BaseFactory):
         self.export_image()
         self.identify()
         self.tile()
+        self.fixed()
         self.unknown()
 
     def open(self, entry: Entry) -> STACReader:
@@ -124,6 +142,8 @@ class ImageServerFactory(BaseFactory):
         if hit and hit[0] == entry.version and now - hit[2] < self.cache_ttl:
             return hit[3]
         cog = self.catalog.cog_version(entry)
+        if cog is None:  # the HEAD failed: keep the version last seen
+            cog = hit[1] if hit else ""
         if hit and hit[:2] == (entry.version, cog):
             with self._lock:
                 self._layers[id] = (*hit[:2], now, hit[3])
@@ -259,26 +279,31 @@ class ImageServerFactory(BaseFactory):
                 if output != ImageType.png
                 else {}
             )
-            with self._exports, rasterio.Env(**env), self.open(entry) as src:
-                try:
-                    img = src.part(
-                        box,
-                        dst_crs=image_sr,
-                        bounds_crs=image_sr,
-                        width=w,
-                        height=h,
-                        assets=[entry.asset],
-                        resampling_method=resampling,
-                        reproject_method=resampling,
-                        **WARP,
+            if not self._exports.acquire(timeout=self.export_wait):
+                raise EsriError(503, "Unable to export image", ["The server is busy, try again"])
+            try:
+                with rasterio.Env(**env), self.open(entry) as src:
+                    try:
+                        img = src.part(
+                            box,
+                            dst_crs=image_sr,
+                            bounds_crs=image_sr,
+                            width=w,
+                            height=h,
+                            assets=[entry.asset],
+                            resampling_method=resampling,
+                            reproject_method=resampling,
+                            **WARP,
+                        )
+                    except TileOutsideBounds:
+                        img = ImageData(numpy.ma.masked_all((len(layer.band_names), h, w), dtype="uint8"))
+                    except OverflowError:  # a bbox too big for GDAL's integer pixel window
+                        raise EsriError(400, "Unable to export image", ["Invalid bbox"])
+                    content, media_type = self.render_func(
+                        img, output_format=output, add_mask=fmt != "jpg", **options
                     )
-                except TileOutsideBounds:
-                    img = ImageData(numpy.ma.masked_all((len(layer.band_names), h, w), dtype="uint8"))
-                except OverflowError:  # a bbox too big for GDAL's integer pixel window
-                    raise EsriError(400, "Unable to export image", ["Invalid bbox"])
-                content, media_type = self.render_func(
-                    img, output_format=output, add_mask=fmt != "jpg", **options
-                )
+            finally:
+                self._exports.release()
             return self.respond(tag, p, content, media_type)
 
     def identify(self):
@@ -357,6 +382,25 @@ class ImageServerFactory(BaseFactory):
                     return not_found(request)
             content, media_type = self.render_func(img, output_format=None, quality=75)
             return self.respond(tag, {}, content, media_type)
+
+    def fixed(self):
+        """Operations answered with what ArcGIS Server says of a raster without them."""
+        bodies = {
+            "legend": esri.legend,
+            "statistics": lambda layer: {"statistics": []},
+            "histograms": lambda layer: {"histograms": []},
+            "rasterAttributeTable": lambda layer: {},
+        }
+        for op, body in bodies.items():
+            self.router.add_api_route(
+                f"/{{id}}/ImageServer/{op}", self.static(body), methods=["GET", "POST"], name=op
+            )
+
+    def static(self, body: Callable[[Layer], dict]) -> Callable:
+        def route(request: Request, entry: Entry = Depends(self.path_dependency), p: dict = Depends(params)):
+            return self.describe(request, entry, p, body)
+
+        return route
 
     def unknown(self):
         """ArcGIS Server answers an operation it does not know with the service description."""

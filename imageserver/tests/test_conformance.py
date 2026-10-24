@@ -98,3 +98,18 @@ def test_raster_functions_and_key_properties(client):
     assert client.get(f"{S}/rasterFunctionInfos").json() == ref["rasterFunctionInfos"]["body"]
     assert "DataType" in client.get(f"{S}/keyProperties").json()
     assert "DataType" in ref["keyProperties"]["body"]
+
+
+@pytest.mark.parametrize("op", ["statistics", "histograms", "rasterAttributeTable"])
+def test_empty_operations(client, op):
+    # NAIP Plus has no statistics or histograms; no reference has an attribute table.
+    ours = client.get(f"{S}/{op}", params={"f": "json"}).json()
+    assert ours == recorded("naip")[op]["body"]
+    assert list(ours) == list(recorded("mtbaldy")[op]["body"])
+
+
+def test_legend_shape(client):
+    ref = recorded("naip")["legend"]["body"]["layers"][0]
+    ours = client.get(f"{S}/legend", params={"f": "json"}).json()["layers"]
+    assert len(ours) == 1 and list(ours[0]) == list(ref)
+    assert ours[0]["layerName"] == "rgba" and ours[0]["legendType"] == ref["legendType"]

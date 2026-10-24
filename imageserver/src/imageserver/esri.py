@@ -214,3 +214,20 @@ RASTER_FUNCTIONS = {
         {"name": "None", "description": "", "help": "", "functionType": 0, "thumbnail": ""}
     ]
 }
+
+
+def legend(layer: Layer) -> dict:
+    """The layer, without swatches: Map Viewer draws the legend of an RGB layer itself."""
+    return {
+        "layers": [
+            {
+                "layerId": 0,
+                "layerName": layer.name,
+                "layerType": "Raster Layer",
+                "minScale": 0,
+                "maxScale": 0,
+                "legendType": "RGB Composite" if len(layer.band_names) >= 3 else "Stretched",
+                "legend": [],
+            }
+        ]
+    }

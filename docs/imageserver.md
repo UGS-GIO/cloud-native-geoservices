@@ -32,6 +32,7 @@ So the endpoints are:
 | `{id}/ImageServer/exportImage` | `STACReader.part()` | `png`, `jpg`, `jpgpng`; any wkid or WKT for `bboxSR` and `imageSR`; `RSP_NearestNeighbor`, `RSP_BilinearInterpolation` (default), `RSP_CubicConvolution`; transparent PNG where there is no data |
 | `{id}/ImageServer/identify` | `STACReader.point()` | `value` is the bands joined with `", "`, or `NoData` |
 | `{id}/ImageServer/keyProperties`, `rasterFunctionInfos` | | static |
+| `{id}/ImageServer/legend`, `statistics`, `histograms`, `rasterAttributeTable` | | empty, as ArcGIS Server answers for a raster without them |
 | `{id}/ImageServer/{any other}` | | the service description, as on ArcGIS Server |
 
 `/` lists each service and its URL. `/ugs/rest/services?f=json` lists them as ArcGIS Server does.
@@ -39,10 +40,11 @@ As on ArcGIS Server, errors are a JSON body with HTTP 200, and `exportImage` gro
 about its center to the aspect ratio of `size` unless `adjustAspectRatio=false`. `exportImage`
 and `identify` also take their parameters as a POST form.
 
-Each answer has an `ETag`, a hash of the server's version (and `GIT_SHA`), the STAC item, the
-COG's own `ETag` (or `Last-Modified` and size, from a HEAD request every `CACHE_TTL`) and the
-request. A COG rewritten in place or a new release changes it. `If-None-Match` is checked before
-the COG is read.
+Each answer has an `ETag`, a hash of the build (`GIT_SHA`, else a hash of the package's files and
+the titiler, rio-tiler and rasterio versions), the STAC item, the COG's own `ETag` (or
+`Last-Modified` and size, from a HEAD request every `CACHE_TTL`; a failed HEAD keeps the last one)
+and the request. A COG rewritten in place or a new build changes it. `If-None-Match` is checked
+before the COG is read.
 
 ## Layer sources
 
@@ -72,6 +74,7 @@ show them (a stretch or a color map).
 | `CACHE_TTL` | 300 | seconds: catalog refresh and `Cache-Control` |
 | `MAX_IMAGE_SIZE` | 2048 | largest `exportImage` width or height |
 | `MAX_EXPORTS` | 1 | `exportImage` reads at once; the others wait. A 2048 × 2048 export takes about 80 MB |
+| `EXPORT_WAIT` | 10 | seconds an `exportImage` waits for a slot before it answers error 503 (busy) |
 | `GIT_SHA` | | the commit, for the ETags; the Dockerfile sets it from `--build-arg GIT_SHA` |
 | `PUBLIC_URL` | request host | base of the URLs `/` lists |
 | `PORT` | 8080 | in the container |
@@ -107,6 +110,10 @@ docker run -p 8080:8080 -e STAC_COLLECTION_URL=https://example.com/stac/items.js
 
 The image is `python:3.12-slim` with the locked dependencies, about 380 MB. It answers about 1.3 s
 after start and uses about 135 MB of memory after a few requests.
+
+On Cloud Run, set `--concurrency` low, such as 8. Requests run on 40 threads, and exports that
+wait for a slot hold threads that tiles need: 45 queued exports raised the slowest tile from 2.8 s
+to 13.9 s. A low concurrency makes Cloud Run start another instance instead.
 
 ## Performance
 
@@ -144,9 +151,9 @@ the aspect-ratio adjustment, errors, and content types.
 
 ## Known gaps
 
-- `legend`, `statistics`, `histograms`, `computeStatisticsHistograms`, `rasterAttributeTable`,
-  `getSamples`, `query` and raster functions are not served. Map Viewer draws the legend of an
-  RGB layer itself.
+- `legend`, `statistics`, `histograms` and `rasterAttributeTable` are empty.
+  `computeStatisticsHistograms`, `getSamples`, `query` and raster functions are not served. Map
+  Viewer draws the legend of an RGB layer itself.
 - `exportImage` with `f=json` returns an `href` to the same request with `f=image`, not to a
   temporary file.
 - `bandIds`, `noData`, `pixelType`, `mosaicRule` and `renderingRule` are ignored.

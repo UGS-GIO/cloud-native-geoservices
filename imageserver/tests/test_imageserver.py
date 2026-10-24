@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -232,6 +235,60 @@ def test_etag_changes_with_the_cog_and_the_build(fresh, data_dir, monkeypatch):
     monkeypatch.setattr(factory, "BUILD", "9.9.9")
     res = c.get(url, headers={"If-None-Match": tag})
     assert res.status_code == 200 and res.headers["etag"] != tag
+
+
+def test_build_without_git_sha(tmp_path, monkeypatch):
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    root = tmp_path / "imageserver"
+    shutil.copytree(Path(factory.__file__).parent, root)
+    build = factory._build(root)
+    assert build == factory._build(root)
+    assert factory._build(root, lambda d: "0") != build
+    src = root / "esri.py"
+    src.write_bytes(src.read_bytes() + b" ")
+    assert factory._build(root) != build
+    monkeypatch.setenv("GIT_SHA", "abc")
+    assert factory._build(root) == "abc"
+
+
+def test_etag_survives_a_failed_cog_check(fresh):
+    c, cog = fresh
+    url = f"{S}/rgba/ImageServer"
+    tag = c.get(url).headers["etag"]
+    cog.unlink()  # the HEAD fails
+    res = c.get(url, headers={"If-None-Match": tag})
+    assert res.status_code == 304
+
+
+def test_busy_export_does_not_wait(data_dir, monkeypatch):
+    monkeypatch.setenv("STAC_COLLECTION_URL", str(data_dir / "items.json"))
+    monkeypatch.setenv("EXPORT_WAIT", "0.2")
+    from imageserver.main import create_app
+
+    c = TestClient(create_app())
+    entered, release = threading.Event(), threading.Event()
+    real = ImageServerFactory.open
+
+    def hold(self, entry):
+        if not entered.is_set():
+            entered.set()
+            release.wait(5)
+        return real(self, entry)
+
+    monkeypatch.setattr(ImageServerFactory, "open", hold)
+    first = threading.Thread(target=export, args=(c,))
+    first.start()
+    try:
+        assert entered.wait(5)
+        threading.Timer(2, release.set).start()
+        start = time.monotonic()
+        res = export(c, size="32,32")
+        assert time.monotonic() - start < 1
+        assert res.json()["error"]["code"] == 503 and res.headers["cache-control"] == "no-store"
+        assert c.get(f"{S}/rgba/ImageServer/tile/14/6156/3100").status_code == 200
+    finally:
+        release.set()
+        first.join()
 
 
 @pytest.mark.parametrize(
