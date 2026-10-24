@@ -5,13 +5,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import threading
+import time
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import urlencode
 
 import numpy
 import rasterio
-from attrs import define, field
+from attrs import Factory, define, field
 from fastapi import Depends, Path, Request
 from fastapi.responses import Response
 from morecantile import tms
@@ -26,6 +30,18 @@ from titiler.core.utils import render_image
 from . import esri
 from .catalog import Catalog, Entry
 from .esri import WEB_MERCATOR, EsriError, Layer
+
+
+def _build() -> str:
+    """This release and commit: a new one can answer the same request differently."""
+    try:
+        v = version("imageserver")
+    except PackageNotFoundError:
+        v = ""
+    return f"{v} {os.environ.get('GIT_SHA', '')}".strip()
+
+
+BUILD = _build()
 
 WEB_MERCATOR_QUAD = tms.get("WebMercatorQuad")
 # Always warp, with bounded memory: a same-CRS read past the COG's edge is otherwise a boundless
@@ -50,6 +66,12 @@ async def params(request: Request) -> dict[str, str]:
     return p
 
 
+def matches(if_none_match: str, tag: str) -> bool:
+    """If-None-Match: "*" or a list of tags, compared weakly (RFC 9110)."""
+    tags = [t.strip().removeprefix("W/") for t in if_none_match.split(",")]
+    return "*" in tags or tag in tags
+
+
 def not_found(request: Request) -> Response:
     """ArcGIS Server's answer to a tile it does not have."""
     return Response(
@@ -68,10 +90,15 @@ class ImageServerFactory(BaseFactory):
     reader: type[STACReader] = STACReader
     render_func: Callable[..., tuple[bytes, str]] = render_image
     environment_dependency: Callable[..., dict] = lambda: {}  # noqa: PIE807 (FastAPI needs a signature)
-    max_image: int = 4100
+    max_image: int = 2048
     cache_ttl: int = 300
+    max_exports: int = 1
     _layers: dict = field(factory=dict, init=False)
     _lock: threading.Lock = field(factory=threading.Lock, init=False)
+    # Big exports take most of the memory: this many render at once, the rest wait.
+    _exports: threading.Semaphore = field(
+        init=False, default=Factory(lambda self: threading.Semaphore(self.max_exports), takes_self=True)
+    )
 
     def path_dependency(self, id: str = Path(description="STAC item id")) -> Entry:
         entry = self.catalog.get(id)
@@ -84,20 +111,27 @@ class ImageServerFactory(BaseFactory):
         self.export_image()
         self.identify()
         self.tile()
+        self.unknown()
 
     def open(self, entry: Entry) -> STACReader:
         return self.reader(entry.url, item=entry.item, include_assets={entry.asset})
 
     def layer(self, entry: Entry) -> Layer:
-        """The COG's description, read once per item version."""
-        key = (entry.item["id"], entry.version)
+        """The COG's description, read again when the item or the COG changes, checked every TTL."""
+        id, now = entry.item["id"], time.monotonic()
         with self._lock:
-            if key in self._layers:
-                return self._layers[key]
-        with Reader(entry.item["assets"][entry.asset]["href"]) as cog:
-            info = cog.info()
-            block = cog.dataset.block_shapes[0][::-1]
-            compression = cog.dataset.tags(ns="IMAGE_STRUCTURE").get("COMPRESSION", "")
+            hit = self._layers.get(id)
+        if hit and hit[0] == entry.version and now - hit[2] < self.cache_ttl:
+            return hit[3]
+        cog = self.catalog.cog_version(entry)
+        if hit and hit[:2] == (entry.version, cog):
+            with self._lock:
+                self._layers[id] = (*hit[:2], now, hit[3])
+            return hit[3]
+        with Reader(entry.item["assets"][entry.asset]["href"]) as src:
+            info = src.info()
+            block = src.dataset.block_shapes[0][::-1]
+            compression = src.dataset.tags(ns="IMAGE_STRUCTURE").get("COMPRESSION", "")
         bands = [i for i, ci in enumerate(info.colorinterp or []) if ci != "alpha"] or list(range(info.count))
         names = [
             info.colorinterp[i].capitalize()
@@ -126,9 +160,10 @@ class ImageServerFactory(BaseFactory):
             maxzoom=WEB_MERCATOR_QUAD.zoom_for_res(pixel, zoom_level_strategy="upper"),
             stats=stats if len(stats) == len(bands) else [],
             copyright=props.get("ugs:author", ""),
+            version=hashlib.sha256(f"{entry.version}\0{cog}".encode()).hexdigest()[:16],
         )
         with self._lock:
-            self._layers[key] = layer
+            self._layers[id] = (entry.version, cog, now, layer)
         return layer
 
     @staticmethod
@@ -137,33 +172,50 @@ class ImageServerFactory(BaseFactory):
         if layer.dtype != "uint8":
             raise EsriError(400, "Unable to export image", [f"Pixel type {layer.dtype} is not supported"])
 
-    def respond(self, request: Request, entry: Entry, body: bytes | dict, media_type: str = "") -> Response:
-        """A cacheable answer: an ETag of the item version and the request, and Cache-Control."""
-        key = f"{entry.version}\0{request.url.path}\0{request.url.query}"
-        tag = f'"{hashlib.sha256(key.encode()).hexdigest()[:32]}"'
-        headers = {
+    def headers(self, tag: str) -> dict[str, str]:
+        return {
             "ETag": tag,
             "Cache-Control": f"public, max-age={self.cache_ttl}, stale-while-revalidate={self.cache_ttl}",
         }
-        if request.headers.get("if-none-match") == tag:
-            return Response(status_code=304, headers=headers)
+
+    def validate(self, request: Request, layer: Layer, p: dict) -> tuple[str, Response | None]:
+        """The ETag, of the build, the item, the COG and the request, and a 304 if the client has it."""
+        key = json.dumps([BUILD, layer.version, request.url.path, sorted(p.items())])
+        tag = f'"{hashlib.sha256(key.encode()).hexdigest()[:32]}"'
+        inm = request.headers.get("if-none-match")
+        if inm and request.method in ("GET", "HEAD") and matches(inm, tag):
+            return tag, Response(status_code=304, headers=self.headers(tag))
+        return tag, None
+
+    def respond(self, tag: str, p: dict, body: bytes | dict, media_type: str = "") -> Response:
         if isinstance(body, dict):
-            indent = 2 if request.query_params.get("f") == "pjson" else None
-            return Response(json.dumps(body, indent=indent), media_type="application/json", headers=headers)
-        return Response(body, media_type=media_type, headers=headers)
+            indent = 2 if p.get("f") == "pjson" else None
+            body, media_type = json.dumps(body, indent=indent), "application/json"
+        return Response(body, media_type=media_type, headers=self.headers(tag))
+
+    def describe(self, request: Request, entry: Entry, p: dict, body: Callable[[Layer], dict]) -> Response:
+        layer = self.layer(entry)
+        tag, cached = self.validate(request, layer, p)
+        return cached or self.respond(tag, p, body(layer))
 
     def metadata(self):
         @self.router.get("/{id}/ImageServer", name="service")
-        def service(request: Request, entry: Entry = Depends(self.path_dependency)):
-            return self.respond(request, entry, esri.service(self.layer(entry), self.max_image))
+        def service(
+            request: Request, entry: Entry = Depends(self.path_dependency), p: dict = Depends(params)
+        ):
+            return self.describe(request, entry, p, lambda layer: esri.service(layer, self.max_image))
 
         @self.router.get("/{id}/ImageServer/keyProperties", name="keyProperties")
-        def key_properties(request: Request, entry: Entry = Depends(self.path_dependency)):
-            return self.respond(request, entry, esri.key_properties(self.layer(entry)))
+        def key_properties(
+            request: Request, entry: Entry = Depends(self.path_dependency), p: dict = Depends(params)
+        ):
+            return self.describe(request, entry, p, esri.key_properties)
 
         @self.router.get("/{id}/ImageServer/rasterFunctionInfos", name="rasterFunctionInfos")
-        def raster_functions(request: Request, entry: Entry = Depends(self.path_dependency)):
-            return self.respond(request, entry, esri.RASTER_FUNCTIONS)
+        def raster_functions(
+            request: Request, entry: Entry = Depends(self.path_dependency), p: dict = Depends(params)
+        ):
+            return self.describe(request, entry, p, lambda layer: esri.RASTER_FUNCTIONS)
 
     def export_image(self):
         @self.router.api_route("/{id}/ImageServer/exportImage", methods=["GET", "POST"], name="exportImage")
@@ -180,20 +232,34 @@ class ImageServerFactory(BaseFactory):
             w, h = esri.parse_size(p.get("size"), self.max_image)
             if bbox_sr != image_sr:
                 box = transform_bounds(bbox_sr, image_sr, *box, densify_pts=21)
+                if not all(map(math.isfinite, box)):
+                    raise EsriError(400, "Unable to export image", ["Invalid bbox"])
             if p.get("adjustaspectratio", "true").lower() != "false":
                 box = esri.adjust_aspect(box, w, h)
             fmt = p.get("format", "jpgpng").lower()
             fmt = fmt if fmt in esri.FORMATS else "jpgpng"
             if p.get("f", "image").lower() in ("json", "pjson"):
                 href = str(request.url.replace(query=urlencode({**p, "f": "image", "format": fmt})))
-                return self.respond(
-                    request,
-                    entry,
-                    {"href": href, "width": w, "height": h, "extent": esri.extent(box, image_sr), "scale": 0},
-                )
+                body = {
+                    "href": href,
+                    "width": w,
+                    "height": h,
+                    "extent": esri.extent(box, image_sr),
+                    "scale": 0,
+                }
+                return self.describe(request, entry, p, lambda layer: body)
             self.drawable(layer)
+            tag, cached = self.validate(request, layer, p)
+            if cached:
+                return cached
             resampling = esri.INTERPOLATION.get(p.get("interpolation", ""), "bilinear")
-            with rasterio.Env(**env), self.open(entry) as src:
+            output = {"jpg": ImageType.jpeg, "jpgpng": None}.get(fmt, ImageType.png)
+            options = (
+                {"quality": esri.parse_quality(p.get("compressionquality"))}
+                if output != ImageType.png
+                else {}
+            )
+            with self._exports, rasterio.Env(**env), self.open(entry) as src:
                 try:
                     img = src.part(
                         box,
@@ -208,13 +274,12 @@ class ImageServerFactory(BaseFactory):
                     )
                 except TileOutsideBounds:
                     img = ImageData(numpy.ma.masked_all((len(layer.band_names), h, w), dtype="uint8"))
-            output = {"jpg": ImageType.jpeg, "jpgpng": None}.get(fmt, ImageType.png)
-            quality = int(p.get("compressionquality") or 75)
-            options = {"quality": quality} if output != ImageType.png else {}
-            content, media_type = self.render_func(
-                img, output_format=output, add_mask=fmt != "jpg", **options
-            )
-            return self.respond(request, entry, content, media_type)
+                except OverflowError:  # a bbox too big for GDAL's integer pixel window
+                    raise EsriError(400, "Unable to export image", ["Invalid bbox"])
+                content, media_type = self.render_func(
+                    img, output_format=output, add_mask=fmt != "jpg", **options
+                )
+            return self.respond(tag, p, content, media_type)
 
     def identify(self):
         @self.router.api_route("/{id}/ImageServer/identify", methods=["GET", "POST"], name="identify")
@@ -224,8 +289,11 @@ class ImageServerFactory(BaseFactory):
             p: dict = Depends(params),
             env: dict = Depends(self.environment_dependency),
         ):
-            self.layer(entry)
+            layer = self.layer(entry)
             x, y, crs = esri.parse_point(p.get("geometry"), WEB_MERCATOR)
+            tag, cached = self.validate(request, layer, p)
+            if cached:
+                return cached
             value = "NoData"
             with rasterio.Env(**env), self.open(entry) as src:
                 try:
@@ -239,8 +307,8 @@ class ImageServerFactory(BaseFactory):
             if crs != WEB_MERCATOR:
                 (x,), (y,) = transform(crs, WEB_MERCATOR, [x], [y])
             return self.respond(
-                request,
-                entry,
+                tag,
+                p,
                 {
                     "objectId": 0,
                     "name": "Pixel",
@@ -256,16 +324,23 @@ class ImageServerFactory(BaseFactory):
         @self.router.get("/{id}/ImageServer/tile/{level}/{row}/{col}", name="tile")
         def tile(
             request: Request,
-            level: int,
-            row: int,
-            col: int,
+            level: str,
+            row: str,
+            col: str,
             entry: Entry = Depends(self.path_dependency),
             env: dict = Depends(self.environment_dependency),
         ):
             layer = self.layer(entry)
             self.drawable(layer)
-            if level > layer.maxzoom:
+            try:
+                level, row, col = int(level), int(row), int(col)
+            except ValueError:
                 return not_found(request)
+            if not (0 <= level <= layer.maxzoom and 0 <= row < 1 << level and 0 <= col < 1 << level):
+                return not_found(request)
+            tag, cached = self.validate(request, layer, {})
+            if cached:
+                return cached
             with rasterio.Env(**env), self.open(entry) as src:
                 try:
                     img = src.tile(
@@ -281,4 +356,13 @@ class ImageServerFactory(BaseFactory):
                 except TileOutsideBounds:
                     return not_found(request)
             content, media_type = self.render_func(img, output_format=None, quality=75)
-            return self.respond(request, entry, content, media_type)
+            return self.respond(tag, {}, content, media_type)
+
+    def unknown(self):
+        """ArcGIS Server answers an operation it does not know with the service description."""
+
+        @self.router.api_route("/{id}/ImageServer/{op:path}", methods=["GET", "POST"], name="unknown")
+        def unknown(
+            request: Request, entry: Entry = Depends(self.path_dependency), p: dict = Depends(params)
+        ):
+            return self.describe(request, entry, p, lambda layer: esri.service(layer, self.max_image))

@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 
-# 512 x 512 pixels of 2 m in Web Mercator near Salt Lake City; the left quarter is transparent.
+# 512 x 512 pixels of 2 m in Web Mercator near Salt Lake City; the left quarter is transparent
+# (alpha in rgba.tif, nodata 0 in nodata.tif).
 ORIGIN = (-12455000.0, 4980000.0)
 SIZE, PIXEL = 512, 2.0
 
@@ -57,6 +58,9 @@ def data_dir(tmp_path_factory):
     alpha = numpy.full((SIZE, SIZE), 255, "uint8")
     alpha[:, : SIZE // 4] = 0
     write_cog(d / "rgba.tif", rgb, "EPSG:3857", from_origin(*ORIGIN, PIXEL, PIXEL), alpha=alpha)
+    write_cog(
+        d / "nodata.tif", numpy.where(alpha, rgb, 0), "EPSG:3857", from_origin(*ORIGIN, PIXEL, PIXEL), 0
+    )
     write_cog(d / "utm.tif", rgb, "EPSG:26912", from_origin(420000, 4510000, 2, 2))
     write_cog(
         d / "dem.tif", pattern(2, SIZE)[:1].astype("float32"), "EPSG:3857", from_origin(*ORIGIN, PIXEL, PIXEL)
@@ -78,6 +82,7 @@ def data_dir(tmp_path_factory):
         "type": "FeatureCollection",
         "items": [
             item("rgba", "rgba.tif"),
+            item("nodata", "nodata.tif"),
             item("utm", "utm.tif", key="cog"),
             item("dem", "dem.tif"),
             {"id": "pdf-only", "assets": {"publication": {"href": "x.pdf", "type": "application/pdf"}}},

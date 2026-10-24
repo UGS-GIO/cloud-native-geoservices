@@ -32,10 +32,17 @@ So the endpoints are:
 | `{id}/ImageServer/exportImage` | `STACReader.part()` | `png`, `jpg`, `jpgpng`; any wkid or WKT for `bboxSR` and `imageSR`; `RSP_NearestNeighbor`, `RSP_BilinearInterpolation` (default), `RSP_CubicConvolution`; transparent PNG where there is no data |
 | `{id}/ImageServer/identify` | `STACReader.point()` | `value` is the bands joined with `", "`, or `NoData` |
 | `{id}/ImageServer/keyProperties`, `rasterFunctionInfos` | | static |
+| `{id}/ImageServer/{any other}` | | the service description, as on ArcGIS Server |
 
 `/` lists each service and its URL. `/ugs/rest/services?f=json` lists them as ArcGIS Server does.
 As on ArcGIS Server, errors are a JSON body with HTTP 200, and `exportImage` grows the `bbox`
-about its center to the aspect ratio of `size` unless `adjustAspectRatio=false`.
+about its center to the aspect ratio of `size` unless `adjustAspectRatio=false`. `exportImage`
+and `identify` also take their parameters as a POST form.
+
+Each answer has an `ETag`, a hash of the server's version (and `GIT_SHA`), the STAC item, the
+COG's own `ETag` (or `Last-Modified` and size, from a HEAD request every `CACHE_TTL`) and the
+request. A COG rewritten in place or a new release changes it. `If-None-Match` is checked before
+the COG is read.
 
 ## Layer sources
 
@@ -63,7 +70,9 @@ show them (a stretch or a color map).
 | `STAC_COLLECTION_URL` | | ItemCollections, comma separated, URLs or local files |
 | `ASSET_KEYS` | `visual,cog,data` | asset keys to serve, in order of preference |
 | `CACHE_TTL` | 300 | seconds: catalog refresh and `Cache-Control` |
-| `MAX_IMAGE_SIZE` | 4100 | largest `exportImage` width or height |
+| `MAX_IMAGE_SIZE` | 2048 | largest `exportImage` width or height |
+| `MAX_EXPORTS` | 1 | `exportImage` reads at once; the others wait. A 2048 × 2048 export takes about 80 MB |
+| `GIT_SHA` | | the commit, for the ETags; the Dockerfile sets it from `--build-arg GIT_SHA` |
 | `PUBLIC_URL` | request host | base of the URLs `/` lists |
 | `PORT` | 8080 | in the container |
 
@@ -112,7 +121,11 @@ its part of the COG:
 | `exportImage` 1024 × 1024, mid zoom | 0.6 s |
 | `exportImage` 1200 × 1600, whole map, PNG | 1.5 s, most of it PNG encoding |
 | `exportImage` 800 × 800 in EPSG:4326 | 0.45 s |
+| `exportImage` 2048 × 2048, PNG | 3 to 6 s; two at once take 3 and 5.4 s, as the second waits |
 | `identify` | 0.4 s first, then a few ms |
+
+Memory peaked at 337 MB over 48 exports of 2048 × 2048, 16 at a time. With `MAX_EXPORTS=2` it
+reached 500 MB, and without `MALLOC_ARENA_MAX=2` the container ran out of memory.
 
 ## Conformance
 
@@ -137,5 +150,4 @@ the aspect-ratio adjustment, errors, and content types.
 - `exportImage` with `f=json` returns an `href` to the same request with `f=image`, not to a
   temporary file.
 - `bandIds`, `noData`, `pixelType`, `mosaicRule` and `renderingRule` are ignored.
-- An unknown operation is a 404; ArcGIS Server answers it with the service description.
 - One `id` is one COG. There are no mosaics of several COGs.

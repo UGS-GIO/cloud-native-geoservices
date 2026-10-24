@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -104,3 +105,16 @@ class Catalog:
 
     def get(self, id: str) -> Entry | None:
         return self.entries().get(id)
+
+    def cog_version(self, entry: Entry) -> str:
+        """The COG's ETag, or Last-Modified and size: it changes when the COG is rewritten in place."""
+        href = entry.item["assets"][entry.asset]["href"]
+        try:
+            if not href.startswith(("http:", "https:")):
+                st = os.stat(href)
+                return f"{st.st_mtime_ns}-{st.st_size}"
+            res = self._client.head(href, follow_redirects=True).raise_for_status()
+        except (httpx.HTTPError, OSError):
+            return ""
+        h = res.headers
+        return h.get("etag") or f"{h.get('last-modified', '')}-{h.get('content-length', '')}"

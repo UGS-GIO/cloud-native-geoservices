@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from dataclasses import dataclass, field
 from importlib import resources
 
@@ -54,6 +55,7 @@ class Layer:
     height: int
     maxzoom: int
     copyright: str = ""
+    version: str = ""  # changes with the item and the COG
     stats: list[dict] = field(default_factory=list)  # per band: min, max, mean, std
 
 
@@ -107,7 +109,7 @@ def parse_bbox(value: str | None) -> tuple[float, float, float, float]:
         xmin, ymin, xmax, ymax = (float(x) for x in box)
     except (ValueError, KeyError, TypeError):
         raise EsriError(400, "Unable to export image", ["Invalid bbox"])
-    if xmax <= xmin or ymax <= ymin:
+    if not all(map(math.isfinite, (xmin, ymin, xmax, ymax))) or xmax <= xmin or ymax <= ymin:
         raise EsriError(400, "Unable to export image", ["Invalid bbox"])
     return xmin, ymin, xmax, ymax
 
@@ -115,7 +117,7 @@ def parse_bbox(value: str | None) -> tuple[float, float, float, float]:
 def parse_size(value: str | None, limit: int) -> tuple[int, int]:
     try:
         w, h = (int(float(p)) for p in (value or "400,400").split(","))
-    except ValueError:
+    except (ValueError, OverflowError):
         raise EsriError(400, "Unable to export image", ["Invalid size"])
     if w <= 0 or h <= 0:
         raise EsriError(400, "Unable to export image", ["Invalid size"])
@@ -144,11 +146,23 @@ def parse_point(geometry: str | None, default: CRS) -> tuple[float, float, CRS]:
             d = json.loads(geometry)
             sr = d.get("spatialReference")
             crs = parse_sr(json.dumps(sr), default) if sr else default
-            return float(d["x"]), float(d["y"]), crs
-        x, y = (float(p) for p in (geometry or "").split(","))
-        return x, y, default
+            x, y = float(d["x"]), float(d["y"])
+        else:
+            crs = default
+            x, y = (float(p) for p in (geometry or "").split(","))
     except (ValueError, KeyError, TypeError):
         raise EsriError(400, "Unable to complete operation.", ["Invalid geometry"])
+    if not (math.isfinite(x) and math.isfinite(y)):
+        raise EsriError(400, "Unable to complete operation.", ["Invalid geometry"])
+    return x, y, crs
+
+
+def parse_quality(value: str | None) -> int:
+    """compressionQuality, 1 to 100; 75 when it is not a number."""
+    try:
+        return min(max(int(float(value)), 1), 100)
+    except (TypeError, ValueError, OverflowError):
+        return 75
 
 
 def extent(box, crs: CRS) -> dict:

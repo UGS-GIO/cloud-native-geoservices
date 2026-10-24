@@ -11,6 +11,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
 from .catalog import Catalog
 from .esri import EsriError
@@ -18,6 +19,7 @@ from .factory import ImageServerFactory
 
 log = logging.getLogger("imageserver")
 PREFIX = "/ugs/rest/services"
+NO_STORE = {"Cache-Control": "no-store"}
 
 
 def create_app() -> FastAPI:
@@ -30,7 +32,8 @@ def create_app() -> FastAPI:
         catalog=catalog,
         router_prefix=PREFIX,
         cache_ttl=ttl,
-        max_image=int(os.environ.get("MAX_IMAGE_SIZE", "4100")),
+        max_image=int(os.environ.get("MAX_IMAGE_SIZE", "2048")),
+        max_exports=int(os.environ.get("MAX_EXPORTS", "1")),
     )
     public_url = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
@@ -40,12 +43,16 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(EsriError)
     def esri_error(request: Request, e: EsriError):
-        return JSONResponse(e.body(), headers={"Cache-Control": "no-store"})
+        return JSONResponse(e.body(), headers=NO_STORE)
+
+    @app.exception_handler(HTTPException)
+    def http_error(request: Request, e: HTTPException):
+        return JSONResponse(EsriError(e.status_code, str(e.detail)).body(), e.status_code, NO_STORE)
 
     @app.exception_handler(Exception)
     def internal(request: Request, e: Exception):
         log.error("request failed: %s", request.url, exc_info=e)
-        return JSONResponse(EsriError(500, "Internal error").body(), headers={"Cache-Control": "no-store"})
+        return JSONResponse(EsriError(500, "Internal error").body(), headers=NO_STORE)
 
     @app.get("/healthz")
     def healthz():
