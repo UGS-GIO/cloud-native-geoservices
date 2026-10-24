@@ -71,7 +71,8 @@ show them (a stretch or a color map).
 |---|---|---|
 | `STAC_COLLECTION_URL` | | ItemCollections, comma separated, URLs or local files |
 | `ASSET_KEYS` | `visual,cog,data` | asset keys to serve, in order of preference |
-| `CACHE_TTL` | 300 | seconds: catalog refresh and `Cache-Control` |
+| `CACHE_TTL` | 300 | seconds: catalog refresh and `Cache-Control` `max-age` |
+| `CDN_TTL` | `CACHE_TTL` | seconds a shared cache (CDN) keeps a response: `s-maxage` |
 | `MAX_IMAGE_SIZE` | 2048 | largest `exportImage` width or height |
 | `MAX_EXPORTS` | 1 | `exportImage` reads at once; the others wait. A 2048 × 2048 export takes about 80 MB |
 | `EXPORT_WAIT` | 10 | seconds an `exportImage` waits for a slot before it answers error 503 (busy) |

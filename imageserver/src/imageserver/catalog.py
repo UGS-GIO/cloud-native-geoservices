@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
@@ -77,9 +78,11 @@ class Catalog:
         self._client = httpx.Client(timeout=10)
 
     def _load(self) -> dict[str, Entry]:
+        with ThreadPoolExecutor(8) as pool:
+            raws = list(pool.map(lambda u: _get(u, self._client), self.urls))
         entries: dict[str, Entry] = {}
-        for url in self.urls:
-            for e in parse(_get(url, self._client), url, self.asset_keys):
+        for url, raw in zip(self.urls, raws):
+            for e in parse(raw, url, self.asset_keys):
                 entries[e.item["id"]] = e  # the last of an id wins
         return entries
 
