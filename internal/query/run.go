@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/project"
 
 	"github.com/UGS-GIO/cloud-native-geoservices/internal/esri"
 	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
@@ -69,7 +70,7 @@ func (s SpatialRef) Envelope(b [4]float64) jsonx.Obj {
 		b[2], b[3] = geom.ExtentToMercator(b[2], b[3])
 	case s.Wkid == 4269:
 		ring := orb.Ring{{b[0], b[1]}, {b[0], b[3]}, {b[2], b[3]}, {b[2], b[1]}}
-		e := geom.Projected(ring, geom.ToNAD83).Bound()
+		e := project.Geometry(ring, geom.ToNAD83).Bound()
 		b = [4]float64{e.Min[0], e.Min[1], e.Max[0], e.Max[1]}
 	}
 	return jsonx.Obj{{K: "xmin", V: b[0]}, {K: "ymin", V: b[1]}, {K: "xmax", V: b[2]}, {K: "ymax", V: b[3]},
@@ -501,7 +502,7 @@ func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
 		}
 	}
 	// g may be a cached shape, so it is projected into a copy.
-	return geom.Projected(g, w.project)
+	return project.Geometry(orb.Clone(g), w.project)
 }
 
 func (w *winnow) outPoint(p orb.Point) orb.Point {
