@@ -33,7 +33,7 @@ var BBox = []string{"bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax"}
 // Column is one attribute: its name and the Esri type the provider declares for it.
 type Column struct {
 	Name string
-	Type string // Integer, Double, Date or String
+	Type string // Integer, BigInteger, Double, Date or String
 }
 
 // Group is one row group: its rows and the bounds its statistics give.
@@ -242,7 +242,13 @@ func fieldType(el *format.SchemaElement) string {
 		return "Date"
 	case format.Int32, format.Boolean:
 		return "Integer"
-	case format.Int64, format.Double, format.Float:
+	case format.Int64:
+		// Unsigned 64-bit values can pass the int64 range.
+		if unsigned(el) {
+			return "Double"
+		}
+		return "BigInteger"
+	case format.Double, format.Float:
 		return "Double"
 	}
 	return "String"

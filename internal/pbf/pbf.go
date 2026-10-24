@@ -83,7 +83,7 @@ var geometryTypes = map[string]uint64{"esriGeometryPoint": 0, "esriGeometryMulti
 var fieldTypes = map[string]uint64{"esriFieldTypeSmallInteger": 0, "esriFieldTypeInteger": 1,
 	"esriFieldTypeSingle": 2, "esriFieldTypeDouble": 3, "esriFieldTypeString": 4, "esriFieldTypeDate": 5,
 	"esriFieldTypeOID": 6, "esriFieldTypeGeometry": 7, "esriFieldTypeBlob": 8, "esriFieldTypeRaster": 9,
-	"esriFieldTypeGUID": 10, "esriFieldTypeGlobalID": 11, "esriFieldTypeXML": 12}
+	"esriFieldTypeGUID": 10, "esriFieldTypeGlobalID": 11, "esriFieldTypeXML": 12, "esriFieldTypeBigInteger": 13}
 
 // Features encodes a features result.
 func Features(fs *query.FeatureSet) []byte {
@@ -209,6 +209,14 @@ func value(b []byte, fieldType string, v any) []byte {
 		return varint(b, 4, protowire.EncodeZigZag(int64(toInt32(js.Number(v)))))
 	case "esriFieldTypeString", "esriFieldTypeGlobalID":
 		return str(b, 1, js.String(v))
+	case "esriFieldTypeBigInteger":
+		if n, ok := v.(int64); ok {
+			return varint(b, 8, protowire.EncodeZigZag(n))
+		}
+		if f := js.Number(v); !math.IsNaN(f) {
+			return varint(b, 8, protowire.EncodeZigZag(int64(f)))
+		}
+		return b
 	case "esriFieldTypeDouble":
 		return double(b, 3, js.Number(v))
 	case "esriFieldTypeDate":

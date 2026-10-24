@@ -33,8 +33,8 @@ type Clause struct {
 // Row gives a field's value by its resolved index: nil, bool, int64, float64 or string.
 type Row func(field int) any
 
-// Resolver maps a field name to an index and its type (Integer, Double, Date or String), or
-// false when there is no such field.
+// Resolver maps a field name to an index and its type (Integer, BigInteger, Double, Date or
+// String), or false when there is no such field.
 type Resolver func(name string) (int, string, bool)
 
 // Match reports whether row satisfies the clause.
@@ -181,6 +181,7 @@ type node struct {
 	e        expr
 	k        kind
 	lit, int bool
+	big      bool // a 64-bit integer: its arithmetic overflows past int64, not int32
 }
 
 type parser struct {
@@ -372,7 +373,8 @@ func (p *parser) combine(op string, l, r node) (node, error) {
 	if z, ok := r.e.(lit); ok && op == "/" && z.v == 0.0 {
 		return l, errSyntax
 	}
-	return node{e: arithExpr{op, l.e, r.e, l.int && r.int, p.clause}, k: k, int: l.int && r.int}, nil
+	in, big := l.int && r.int, (l.big || r.big) && l.int && r.int
+	return node{e: arithExpr{op, l.e, r.e, in, big, p.clause}, k: k, int: in, big: big}, nil
 }
 
 func (p *parser) value() (node, error) {
@@ -396,7 +398,7 @@ func (p *parser) value() (node, error) {
 					return v, errSyntax
 				}
 				if t.text == "-" {
-					v.e = arithExpr{"-", lit{0.0}, v.e, v.int, p.clause}
+					v.e = arithExpr{"-", lit{0.0}, v.e, v.int, v.big, p.clause}
 				}
 				return v, nil
 			}
@@ -473,6 +475,8 @@ func (p *parser) column(name string) (node, error) {
 	switch typ {
 	case "Integer":
 		return node{e: field(i), k: kNum, int: true}, nil
+	case "BigInteger":
+		return node{e: field(i), k: kNum, int: true, big: true}, nil
 	case "Double":
 		return node{e: field(i), k: kNum}, nil
 	case "Date":
@@ -594,10 +598,10 @@ type logicExpr struct {
 }
 type notExpr struct{ e expr }
 type arithExpr struct {
-	op     string
-	l, r   expr
-	int    bool
-	clause *Clause
+	op       string
+	l, r     expr
+	int, big bool
+	clause   *Clause
 }
 type cmpExpr struct {
 	op     string
@@ -729,8 +733,8 @@ func (e arithExpr) eval(row Row) any {
 			r = math.Trunc(r)
 		}
 	}
-	if e.int && (r < math.MinInt32 || r > math.MaxInt32) {
-		e.clause.bad = true // SQL Server's int overflows
+	if e.big && (r < math.MinInt64 || r >= math.MaxInt64) || e.int && !e.big && (r < math.MinInt32 || r > math.MaxInt32) {
+		e.clause.bad = true // SQL Server's int and bigint overflow
 		return nil
 	}
 	return r

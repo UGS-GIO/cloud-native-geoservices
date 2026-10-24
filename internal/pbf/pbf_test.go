@@ -35,6 +35,14 @@ func fields(t *testing.T, b []byte) map[protowire.Number][][]byte {
 	return out
 }
 
+func TestBigInteger(t *testing.T) {
+	b := value(nil, "esriFieldTypeBigInteger", float64(8489717270951711))
+	v := fields(t, b)[8]
+	if n, _ := protowire.ConsumeVarint(v[0]); len(v) != 1 || protowire.DecodeZigZag(n) != 8489717270951711 {
+		t.Errorf("sint64 value %x", b)
+	}
+}
+
 func TestCount(t *testing.T) {
 	q := fields(t, Count(19743))[2][0]
 	c := fields(t, fields(t, q)[2][0])

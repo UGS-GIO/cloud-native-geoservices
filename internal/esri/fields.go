@@ -14,6 +14,8 @@ func FieldType(t string) string {
 		return "esriFieldTypeDouble"
 	case "integer":
 		return "esriFieldTypeInteger"
+	case "biginteger":
+		return "esriFieldTypeBigInteger"
 	case "date":
 		return "esriFieldTypeDate"
 	}
@@ -108,6 +110,8 @@ func StatisticField(name, kind string, m *Metadata, source string) Field {
 			switch FieldType(c.Type) {
 			case "esriFieldTypeInteger":
 				t, sql = "esriFieldTypeInteger", "sqlTypeInteger"
+			case "esriFieldTypeBigInteger":
+				t, sql = "esriFieldTypeBigInteger", "sqlTypeBigInt"
 			case "esriFieldTypeDouble":
 				sql = "sqlTypeDouble"
 			case "esriFieldTypeDate":
