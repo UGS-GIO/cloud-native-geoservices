@@ -21,7 +21,8 @@ flowchart TD
 1. The first read of a file fetches its last 256 KiB, which usually holds the whole footer. The
    footer gives the schema, the row groups and their statistics.
 2. A spatial filter becomes a lon/lat box. Row groups whose `bbox_*` statistics miss the box are
-   skipped.
+   skipped. A file without the bbox columns uses the geospatial statistics of its `GEOMETRY` or
+   `GEOGRAPHY` column instead, and reads the geometry of every row in the row groups left.
 3. Where the file has a page index, the server reads the column index of the bbox columns and
    skips the pages whose bounds miss the box. The bbox values that are left pick the rows.
 4. The server reads the attribute and geometry columns for those rows only. Geometry is always

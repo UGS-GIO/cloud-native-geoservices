@@ -1,10 +1,10 @@
 // Package pq reads a layer's GeoParquet over https, fetching only what a request needs.
 //
-// Row groups are pruned on the bbox covering columns' statistics, and where the file has a page
-// index, so are the bbox columns' pages; the bbox values left pick the matching rows, and only
-// the pages holding them are fetched (small pages, ~100 rows, read best). Decoded values
-// stay in a cache per file, column and row group (or page), so a warm request skips zstd and
-// parquet decoding.
+// Row groups are pruned on the bbox covering columns' statistics, or without a covering on the
+// geometry column's geospatial statistics. Where the file has a page index, so are the bbox
+// columns' pages; the bbox values left pick the matching rows, and only the pages holding them
+// are fetched (small pages, ~100 rows, read best). Decoded values stay in a cache per file,
+// column and row group (or page), so a warm request skips zstd and parquet decoding.
 package pq
 
 import (
@@ -107,16 +107,20 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	if v, ok := pf.Lookup("geo"); ok {
 		_ = json.Unmarshal([]byte(v), &geo)
 	}
-	l.Geom = geo.Primary
-	if l.Geom == "" {
-		l.Geom = "geom"
-	}
-
 	// The schema elements of the leaf columns, by leaf column index; top-level leaves are fields.
 	var elements []*format.SchemaElement
 	for i := range md.Schema {
 		if md.Schema[i].Type.Valid {
 			elements = append(elements, &md.Schema[i])
+		}
+	}
+	l.Geom = geo.Primary
+	if l.Geom == "" {
+		l.Geom = "geom"
+		// Without geo metadata, as GeoParquet 2.0 allows: geom, else the first native geometry column.
+		hasGeom := slices.ContainsFunc(elements, func(el *format.SchemaElement) bool { return el.Name == "geom" })
+		if i := slices.IndexFunc(elements, native); i >= 0 && !hasGeom {
+			l.Geom = elements[i].Name
 		}
 	}
 	for _, c := range pf.Root().Columns() {
@@ -138,6 +142,10 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 			Xmin: l.stat(rg, "bbox_xmin", false), Ymin: l.stat(rg, "bbox_ymin", false),
 			Xmax: l.stat(rg, "bbox_xmax", true), Ymax: l.stat(rg, "bbox_ymax", true),
 			IDMin: l.stat(rg, "feature_id", false), IDMax: l.stat(rg, "feature_id", true)}
+		if !l.HasBBox {
+			b := l.geoBounds(rg)
+			g.Xmin, g.Ymin, g.Xmax, g.Ymax = b.Xmin, b.Ymin, b.Xmax, b.Ymax
+		}
 		start += rg.NumRows
 		l.Groups = append(l.Groups, g)
 	}
@@ -153,6 +161,11 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	t := ""
 	if types := geo.Columns[l.Geom].Types; len(types) > 0 {
 		t = types[0]
+	} else if gl, ok := l.leaves[l.Geom]; ok && len(md.RowGroups) > 0 {
+		// The WKB type code of the first row group's geospatial statistics, less Z and M.
+		if codes := md.RowGroups[0].Columns[gl.index].MetaData.GeospatialStatistics.GeoSpatialTypes; len(codes) > 0 {
+			t = wkbTypes[codes[0]%1000]
+		}
 	}
 	switch {
 	case strings.Contains(t, "Point"):
@@ -185,6 +198,40 @@ func (l *Layer) stat(rg format.RowGroup, name string, isMax bool) float64 {
 		b = cm.Statistics.MaxValue
 	}
 	return number(cm.Type, b)
+}
+
+// geoBounds is a row group's bounds from the geometry column's geospatial statistics, NaN where
+// unknown. An all-zero box is taken as absent, and a GEOGRAPHY box across the antimeridian
+// (xmin > xmax) leaves x unknown.
+func (l *Layer) geoBounds(rg format.RowGroup) Group {
+	nan := math.NaN()
+	g := Group{Xmin: nan, Ymin: nan, Xmax: nan, Ymax: nan}
+	lf, ok := l.leaves[l.Geom]
+	if !ok {
+		return g
+	}
+	b := rg.Columns[lf.index].MetaData.GeospatialStatistics.BBox
+	if b.XMin == 0 && b.XMax == 0 && b.YMin == 0 && b.YMax == 0 {
+		return g
+	}
+	g.Ymin, g.Ymax = b.YMin, b.YMax
+	if b.XMin <= b.XMax {
+		g.Xmin, g.Xmax = b.XMin, b.XMax
+	}
+	return g
+}
+
+// wkbTypes names the WKB geometry type codes.
+var wkbTypes = map[int32]string{1: "Point", 2: "LineString", 3: "Polygon", 4: "MultiPoint",
+	5: "MultiLineString", 6: "MultiPolygon"}
+
+// native reports a column of the GEOMETRY or GEOGRAPHY logical type.
+func native(el *format.SchemaElement) bool {
+	switch el.LogicalType.Value.(type) {
+	case *format.GeometryType, *format.GeographyType:
+		return true
+	}
+	return false
 }
 
 // number is a plain-encoded statistic of a numeric column, NaN when absent.

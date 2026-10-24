@@ -2,6 +2,7 @@ package pq
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
 	"math/rand/v2"
 	"os"
@@ -265,6 +266,142 @@ func TestFieldTypeMatchesConverter(t *testing.T) {
 		kind, _ := converter(tt.el, false)
 		if got := fieldType(tt.el); got != tt.want || (got == "String") != (kind == KindString) {
 			t.Errorf("%v %v: %s, kind %v", tt.el.Type, tt.el.LogicalType.Value, got, kind)
+		}
+	}
+}
+
+// A GeoParquet 2.0 file: native geometry under another name, no covering and no geo metadata.
+// The geospatial statistics prune row groups, and the rows in the box stay those of a full scan.
+func TestNativeGeomColumn(t *testing.T) {
+	type both struct {
+		Label []byte `parquet:"label,geometry"`
+		Geom  []byte `parquet:"geom,geometry"`
+	}
+	type other struct {
+		Label []byte `parquet:"label,geometry"`
+		Shape []byte `parquet:"shape,geometry"`
+	}
+	pt := binary.LittleEndian.AppendUint32([]byte{1}, 1)
+	pt = append(pt, make([]byte, 16)...)
+	open := func(write func(*os.File)) *Layer {
+		path := filepath.Join(t.TempDir(), "two.parquet")
+		f, _ := os.Create(path)
+		write(f)
+		f.Close()
+		l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	l := open(func(f *os.File) {
+		w := parquet.NewGenericWriter[both](f)
+		w.Write([]both{{pt, pt}})
+		w.Close()
+	})
+	if l.Geom != "geom" {
+		t.Errorf("with a geom column: %q", l.Geom)
+	}
+	l = open(func(f *os.File) {
+		w := parquet.NewGenericWriter[other](f)
+		w.Write([]other{{pt, pt}})
+		w.Close()
+	})
+	if l.Geom != "label" {
+		t.Errorf("without one, the first native column: %q", l.Geom)
+	}
+}
+
+func TestNativeGeometry(t *testing.T) {
+	type row struct {
+		ID    int64  `parquet:"feature_id"`
+		Shape []byte `parquet:"shape,geometry"`
+	}
+	point := func(x, y float64) []byte {
+		b := binary.LittleEndian.AppendUint32([]byte{1}, 1)
+		b = binary.LittleEndian.AppendUint64(b, math.Float64bits(x))
+		return binary.LittleEndian.AppendUint64(b, math.Float64bits(y))
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	rows := make([]row, 3000)
+	for i := range rows {
+		rows[i] = row{int64(i + 1), point(-10+20*float64(i)/3000, -10+20*rng.Float64())}
+	}
+	path := filepath.Join(t.TempDir(), "native.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f, parquet.MaxRowsPerRowGroup(500))
+	if _, err := w.Write(rows); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	f.Close()
+	ctx := context.Background()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Geom != "shape" || l.GeometryType != "Point" || l.HasBBox {
+		t.Fatalf("%+v", l)
+	}
+	nan := math.NaN()
+	g := &l.Groups[0] // no statistics: read the group
+	g.Xmin, g.Ymin, g.Xmax, g.Ymax = nan, nan, nan, nan
+	box := [4]float64{-1, -1, 1, 1}
+	got, err := l.Select(ctx, Selection{Box: &box})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[int]bool{}
+	for _, r := range got {
+		groups[l.groupOf(r)] = true
+	}
+	if len(groups) != 3 || !groups[0] {
+		t.Errorf("row groups read %v", groups)
+	}
+	in := func(rows []int64) (out []int64) {
+		v, _ := l.Read(ctx, []string{"shape"}, rows)
+		for i, r := range rows {
+			b := v.Bytes(0, i)
+			x, y := math.Float64frombits(binary.LittleEndian.Uint64(b[5:])), math.Float64frombits(binary.LittleEndian.Uint64(b[13:]))
+			if x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3] {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	if want := in(l.AllRows()); len(want) == 0 || !slices.Equal(in(got), want) {
+		t.Errorf("%d rows in the box, want %d", len(in(got)), len(want))
+	}
+	// Ids and a box: an id in a row group far from the box is dropped.
+	if ids, _ := l.Select(ctx, Selection{IDs: []int64{1, 3000}, Box: &box}); !slices.Equal(ids, []int64{0}) {
+		t.Errorf("ids in the box %v", ids)
+	}
+}
+
+// Geospatial statistics bound a row group; absent ones and a GEOGRAPHY box across the
+// antimeridian leave what they cannot bound unknown.
+func TestGeoBounds(t *testing.T) {
+	l := &Layer{Geom: "geom", leaves: map[string]leaf{"geom": {}}}
+	rg := func(b format.BoundingBox) format.RowGroup {
+		return format.RowGroup{Columns: []format.ColumnChunk{{MetaData: format.ColumnMetaData{
+			GeospatialStatistics: format.GeospatialStatistics{BBox: b}}}}}
+	}
+	nan := math.NaN()
+	for _, tt := range []struct {
+		b    format.BoundingBox
+		want [4]float64
+	}{
+		{format.BoundingBox{XMin: 1, XMax: 2, YMin: 3, YMax: 4}, [4]float64{1, 3, 2, 4}},
+		{format.BoundingBox{}, [4]float64{nan, nan, nan, nan}},
+		{format.BoundingBox{XMin: 170, XMax: -170, YMin: -5, YMax: 5}, [4]float64{nan, -5, nan, 5}},
+	} {
+		g := l.geoBounds(rg(tt.b))
+		got := [4]float64{g.Xmin, g.Ymin, g.Xmax, g.Ymax}
+		for i := range got {
+			if got[i] != tt.want[i] && !(math.IsNaN(got[i]) && math.IsNaN(tt.want[i])) {
+				t.Errorf("%+v: %v", tt.b, got)
+				break
+			}
 		}
 	}
 }
