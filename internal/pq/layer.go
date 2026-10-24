@@ -244,10 +244,7 @@ func fieldType(el *format.SchemaElement) string {
 		return "Integer"
 	case format.Int64:
 		// Unsigned 64-bit values can pass the int64 range.
-		if it, ok := el.LogicalType.Value.(*format.IntType); ok && !it.IsSigned {
-			return "Double"
-		}
-		if ct, ok := converted(el); ok && ct == deprecated.Uint64 {
+		if unsigned(el) {
 			return "Double"
 		}
 		return "BigInteger"
