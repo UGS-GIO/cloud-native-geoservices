@@ -105,6 +105,7 @@ func TestInt64FieldTypes(t *testing.T) {
 		Count int64  `parquet:"count"`
 		Key   int64  `parquet:"key"`
 		Empty *int64 `parquet:"empty,optional"`
+		Big   uint64 `parquet:"big"`
 	}
 	path := filepath.Join(t.TempDir(), "ints.parquet")
 	f, _ := os.Create(path)
@@ -120,8 +121,8 @@ func TestInt64FieldTypes(t *testing.T) {
 	for _, c := range l.Columns {
 		got[c.Name] = c.Type
 	}
-	// A column with no statistics may hold anything.
-	if got["count"] != "Integer" || got["key"] != "BigInteger" || got["empty"] != "BigInteger" {
+	// The type comes from the schema, as in ArcGIS Online, whatever the values.
+	if got["count"] != "BigInteger" || got["key"] != "BigInteger" || got["empty"] != "BigInteger" || got["big"] != "Double" {
 		t.Errorf("types %v", got)
 	}
 }

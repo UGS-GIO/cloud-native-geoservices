@@ -210,7 +210,13 @@ func value(b []byte, fieldType string, v any) []byte {
 	case "esriFieldTypeString", "esriFieldTypeGlobalID":
 		return str(b, 1, js.String(v))
 	case "esriFieldTypeBigInteger":
-		return varint(b, 8, protowire.EncodeZigZag(int64(js.Number(v))))
+		if n, ok := v.(int64); ok {
+			return varint(b, 8, protowire.EncodeZigZag(n))
+		}
+		if f := js.Number(v); !math.IsNaN(f) {
+			return varint(b, 8, protowire.EncodeZigZag(int64(f)))
+		}
+		return b
 	case "esriFieldTypeDouble":
 		return double(b, 3, js.Number(v))
 	case "esriFieldTypeDate":

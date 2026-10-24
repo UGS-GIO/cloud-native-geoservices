@@ -164,9 +164,8 @@ served as fields.
 |---|---|
 | `feature_id` | `esriFieldTypeOID` |
 | `INT32`, `BOOLEAN` | `esriFieldTypeInteger` |
-| `INT64` whose row group statistics all fit in 32 bits | `esriFieldTypeInteger` |
-| Other `INT64` | `esriFieldTypeBigInteger` |
-| `FLOAT`, `DOUBLE` | `esriFieldTypeDouble` |
+| `INT64` | `esriFieldTypeBigInteger` |
+| Unsigned `INT64`, `FLOAT`, `DOUBLE` | `esriFieldTypeDouble` |
 | `DATE`, `TIMESTAMP` (milli, micro or nano) | `esriFieldTypeDate` |
 | Anything else | `esriFieldTypeString` |
 

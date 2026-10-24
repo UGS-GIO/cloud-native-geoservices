@@ -92,6 +92,21 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func TestBigIntegerArithmetic(t *testing.T) {
+	big := func(name string) (int, string, bool) { return 0, "BigInteger", strings.EqualFold(name, "k") }
+	r := row(int64(8489717270951711))
+	for _, w := range []string{"k + 1 > 0", "k / 2 > 4000000000000000", "k - 0 = 8489717270951711"} {
+		c, err := Parse(w, big)
+		if err != nil || !c.Match(r) || c.Err() != nil {
+			t.Errorf("%q: %v %v", w, err, c.Err())
+		}
+	}
+	c, _ := Parse("k * k > 0", big)
+	if c.Match(r); c.Err() == nil {
+		t.Error("k * k overflows bigint")
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	for _, w := range []string{"foo === ", "acres >", "(acres > 1", "acres IN 1", "'open", "acres BETWEEN 1", "x LIKE", "missing = 1", "missing IS NULL",
 		"timestamp = 0", "timestamp > 'x'", "count = '3.5'", "count = TRUE", "count",
