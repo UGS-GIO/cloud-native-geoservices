@@ -25,6 +25,14 @@ func overlaps(g Group, b *[4]float64) bool {
 	return !(g.Xmax < b[0] || g.Xmin > b[2] || g.Ymax < b[1] || g.Ymin > b[3])
 }
 
+// rows appends the group's rows to dst.
+func (g Group) rows(dst []int64) []int64 {
+	for r := g.Start; r < g.Start+g.Rows; r++ {
+		dst = append(dst, r)
+	}
+	return dst
+}
+
 // Select returns the rows a selection picks, in file (= feature_id) order.
 func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 	var rows []int64
@@ -58,9 +66,7 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 				if i == len(sorted) || float64(sorted[i]) > g.IDMax {
 					continue
 				}
-				for r := g.Start; r < g.Start+g.Rows; r++ {
-					cand = append(cand, r)
-				}
+				cand = g.rows(cand)
 			}
 			if len(cand) == 0 {
 				break
@@ -86,9 +92,7 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 			if !overlaps(g, s.Box) {
 				continue
 			}
-			for r := g.Start; r < g.Start+g.Rows; r++ {
-				rows = append(rows, r)
-			}
+			rows = g.rows(rows)
 		}
 	case s.Page != nil:
 		end := min(l.Rows, s.Page.Offset+s.Page.Limit+1) // one extra: is there more?
@@ -97,6 +101,10 @@ func (l *Layer) Select(ctx context.Context, s Selection) ([]int64, error) {
 		}
 	default:
 		rows = l.AllRows()
+	}
+	if s.Box != nil && len(s.IDs) > 0 && !l.HasBBox {
+		// Both filters, without a covering: keep the id rows in row groups that may meet the box.
+		rows = slices.DeleteFunc(rows, func(r int64) bool { return !overlaps(l.Groups[l.groupOf(r)], s.Box) })
 	}
 	if s.Box != nil && len(s.IDs) > 0 && l.HasBBox && len(rows) > 0 {
 		// Both filters: keep the id rows the box prefilter keeps.

@@ -372,6 +372,10 @@ func TestNativeGeometry(t *testing.T) {
 	if want := in(l.AllRows()); len(want) == 0 || !slices.Equal(in(got), want) {
 		t.Errorf("%d rows in the box, want %d", len(in(got)), len(want))
 	}
+	// Ids and a box: an id in a row group far from the box is dropped.
+	if ids, _ := l.Select(ctx, Selection{IDs: []int64{1, 3000}, Box: &box}); !slices.Equal(ids, []int64{0}) {
+		t.Errorf("ids in the box %v", ids)
+	}
 }
 
 // Geospatial statistics bound a row group; absent ones and a GEOGRAPHY box across the
