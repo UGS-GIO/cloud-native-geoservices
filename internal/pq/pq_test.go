@@ -272,6 +272,46 @@ func TestFieldTypeMatchesConverter(t *testing.T) {
 
 // A GeoParquet 2.0 file: native geometry under another name, no covering and no geo metadata.
 // The geospatial statistics prune row groups, and the rows in the box stay those of a full scan.
+func TestNativeGeomColumn(t *testing.T) {
+	type both struct {
+		Label []byte `parquet:"label,geometry"`
+		Geom  []byte `parquet:"geom,geometry"`
+	}
+	type other struct {
+		Label []byte `parquet:"label,geometry"`
+		Shape []byte `parquet:"shape,geometry"`
+	}
+	pt := binary.LittleEndian.AppendUint32([]byte{1}, 1)
+	pt = append(pt, make([]byte, 16)...)
+	open := func(write func(*os.File)) *Layer {
+		path := filepath.Join(t.TempDir(), "two.parquet")
+		f, _ := os.Create(path)
+		write(f)
+		f.Close()
+		l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	l := open(func(f *os.File) {
+		w := parquet.NewGenericWriter[both](f)
+		w.Write([]both{{pt, pt}})
+		w.Close()
+	})
+	if l.Geom != "geom" {
+		t.Errorf("with a geom column: %q", l.Geom)
+	}
+	l = open(func(f *os.File) {
+		w := parquet.NewGenericWriter[other](f)
+		w.Write([]other{{pt, pt}})
+		w.Close()
+	})
+	if l.Geom != "label" {
+		t.Errorf("without one, the first native column: %q", l.Geom)
+	}
+}
+
 func TestNativeGeometry(t *testing.T) {
 	type row struct {
 		ID    int64  `parquet:"feature_id"`

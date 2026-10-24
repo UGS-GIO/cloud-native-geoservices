@@ -8,8 +8,8 @@ It reads the files in place, from local disk or with HTTP range requests, and ha
 no data copy.
 
 Each request reads only the row groups, pages and columns it needs. Row groups are pruned on the
-statistics of the GeoParquet bbox covering columns, or of a native `GEOMETRY` column without
-them, and inside a row group the bbox columns pick the rows.
+statistics of the GeoParquet bbox covering columns, or of a native `GEOMETRY` or `GEOGRAPHY`
+column without them, and inside a row group the bbox columns pick the rows.
 
 ## Quickstart
 

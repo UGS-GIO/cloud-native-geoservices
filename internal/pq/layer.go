@@ -117,8 +117,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	l.Geom = geo.Primary
 	if l.Geom == "" {
 		l.Geom = "geom"
-		// Without geo metadata, as GeoParquet 2.0 allows, the first native geometry column.
-		if i := slices.IndexFunc(elements, native); i >= 0 {
+		// Without geo metadata, as GeoParquet 2.0 allows: geom, else the first native geometry column.
+		hasGeom := slices.ContainsFunc(elements, func(el *format.SchemaElement) bool { return el.Name == "geom" })
+		if i := slices.IndexFunc(elements, native); i >= 0 && !hasGeom {
 			l.Geom = elements[i].Name
 		}
 	}
