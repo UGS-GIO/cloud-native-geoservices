@@ -182,6 +182,11 @@ func TestETag(t *testing.T) {
 	if other, _ := get(t, u+"&outSR=102100"); other.Header.Get("ETag") == tag {
 		t.Error("different query, same ETag")
 	}
+	defer func(b string) { build = b }(build)
+	build = "v9.9.9"
+	if res, _ := get(t, u, "If-None-Match", tag); res.StatusCode != http.StatusOK || res.Header.Get("ETag") == tag {
+		t.Errorf("a new release revalidated the old ETag: %d", res.StatusCode)
+	}
 }
 
 func TestBodyLimit(t *testing.T) {
