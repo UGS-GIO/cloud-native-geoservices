@@ -116,7 +116,9 @@ class Catalog:
             if not href.startswith(("http:", "https:")):
                 st = os.stat(href)
                 return f"{st.st_mtime_ns}-{st.st_size}"
-            res = self._client.head(href, follow_redirects=True).raise_for_status()
+            res = self._client.head(
+                with_query(href, "_cb", str(int(time.time()))), follow_redirects=True
+            ).raise_for_status()
         except (httpx.HTTPError, OSError):
             return None
         h = res.headers
