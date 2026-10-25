@@ -329,11 +329,17 @@ func TestServicesDirectory(t *testing.T) {
 		t.Errorf("unknown folder: %v", body)
 	}
 	for u, want := range map[string]string{"/ugs/rest/services": `href="/ugs/rest/services/qfaults"`,
-		"/ugs/rest/services/wells": `href="/ugs/rest/services/wells/by-purpose/FeatureServer"`} {
+		"/ugs/rest/services/wells": `href="` + ts.URL + `/ugs/rest/services/wells/by-purpose/FeatureServer"`} {
 		res, body := getText(t, ts.URL+u)
 		if !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(body, want) {
 			t.Errorf("%s: %s %s", u, res.Header.Get("Content-Type"), body)
 		}
+	}
+	_, page := getText(t, ts.URL+"/ugs/rest/services/wells")
+	svc := url.QueryEscape(ts.URL + "/ugs/rest/services/wells/by-purpose/FeatureServer")
+	if !strings.Contains(page, `data-url="`+ts.URL+"/ugs/rest/services/wells/by-purpose/FeatureServer\"") ||
+		!strings.Contains(page, "mapviewer/index.html?url="+svc) {
+		t.Errorf("copy URL or Map Viewer link missing: %s", page)
 	}
 }
 
