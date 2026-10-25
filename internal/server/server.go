@@ -4,10 +4,13 @@ package server
 
 import (
 	"context"
+	"html"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +76,10 @@ func (s *Server) Handler() http.Handler {
 		s.send(w, r, &encoded{body: jsonx.Marshal(jsonx.Obj{{K: "ok", V: true}}), contentType: jsonType}, "")
 	})
 	mux.HandleFunc("/ugs/rest/info", s.restInfo)
+	mux.HandleFunc("/ugs/rest/services", s.services)
+	mux.HandleFunc("/ugs/rest/services/{$}", s.services)
+	mux.HandleFunc("/ugs/rest/services/{topic}", s.services)
+	mux.HandleFunc("/ugs/rest/services/{topic}/{$}", s.services)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer", s.service)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer/{layer}", s.service)
 	mux.HandleFunc("/ugs/rest/services/{topic}/{render}/FeatureServer/{layer}/{op}", s.service)
@@ -136,8 +143,84 @@ func (s *Server) restInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A public server: as on an ArcGIS Server without security, there is no token service.
-	s.send(w, r, encode(p, jsonx.Obj{{K: "currentVersion", V: 12}, {K: "fullVersion", V: "12.0.0"},
+	s.send(w, r, encode(p, jsonx.Obj{{K: "currentVersion", V: currentVersion}, {K: "fullVersion", V: "12.0.0"},
 		{K: "authInfo", V: jsonx.Obj{{K: "isTokenBasedSecurity", V: false}}}}), "")
+}
+
+const currentVersion = 12
+
+// services is the ArcGIS services directory: each topic is a folder, and each render is the
+// FeatureServer {topic}/{render} in it. Without f=json or f=pjson the answer is an HTML page.
+func (s *Server) services(w http.ResponseWriter, r *http.Request) {
+	p, _, err := s.params(r)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	folder := r.PathValue("topic")
+	folders, services := []string{}, []any{}
+	var names []string
+	if folder == "" {
+		items, err := s.Provider.Catalog.Topics(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		for _, it := range items {
+			folders = append(folders, it.ID)
+		}
+		slices.Sort(folders)
+	} else {
+		it, err := s.Provider.Catalog.Topic(r.Context(), folder)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		for _, rd := range it.Renders {
+			names = append(names, it.ID+"/"+rd.Name)
+			services = append(services, jsonx.Obj{{K: "name", V: it.ID + "/" + rd.Name}, {K: "type", V: "FeatureServer"}})
+		}
+	}
+	var out *encoded
+	if _, cb := p.String("callback"); cb || p["f"] != nil && p["f"] != "html" {
+		if err := infoFormat(p); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		out = encode(p, jsonx.Obj{{K: "currentVersion", V: currentVersion}, {K: "folders", V: folders}, {K: "services", V: services}})
+	} else {
+		out = &encoded{body: directoryPage(folder, folders, names), contentType: "text/html; charset=utf-8"}
+	}
+	tag := etag(string(out.body), r)
+	if held := notModified(r, tag); held != "" {
+		s.send(w, r, nil, held)
+		return
+	}
+	s.send(w, r, out, tag)
+}
+
+// directoryPage is the HTML services directory, with a link to each folder and service.
+func directoryPage(folder string, folders, services []string) []byte {
+	var b strings.Builder
+	b.WriteString("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Folder: /")
+	b.WriteString(html.EscapeString(folder) + "</title>\n</head>\n<body>\n<h1>Folder: /" + html.EscapeString(folder) + "</h1>\n")
+	list := func(head string, names []string, href func(string) string) {
+		if len(names) == 0 {
+			return
+		}
+		b.WriteString("<h2>" + head + "</h2>\n<ul>\n")
+		for _, n := range names {
+			b.WriteString("<li><a href=\"" + html.EscapeString(href(n)) + "\">" + html.EscapeString(n) + "</a></li>\n")
+		}
+		b.WriteString("</ul>\n")
+	}
+	list("Folders", folders, func(n string) string { return "/ugs/rest/services/" + url.PathEscape(n) })
+	list("Services", services, func(n string) string {
+		topic, render, _ := strings.Cut(n, "/")
+		return "/ugs/rest/services/" + url.PathEscape(topic) + "/" + url.PathEscape(render) + "/FeatureServer"
+	})
+	b.WriteString("<p><a href=\"" + html.EscapeString(path.Join("/ugs/rest/services", url.PathEscape(folder))) + "?f=pjson\">JSON</a></p>\n</body>\n</html>\n")
+	return []byte(b.String())
 }
 
 func infoFormat(p query.Params) error {

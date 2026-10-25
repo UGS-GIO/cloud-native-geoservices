@@ -12,6 +12,8 @@ answer the same request, the server gives ArcGIS Online's answer. The
 | `/` | Every layer and render, with its URL |
 | `/healthz` | `{"ok": true}` |
 | `/ugs/rest/info` | Server info. `authInfo.isTokenBasedSecurity` is `false`, as on an ArcGIS Server without security. |
+| `/ugs/rest/services` | Services directory: each `{id}` is a folder |
+| `/ugs/rest/services/{id}` | Folder: each render is the FeatureServer `{id}/{render}` |
 | `/ugs/rest/services/{id}/{render}/FeatureServer` | Service description |
 | `/ugs/rest/services/{id}/{render}/FeatureServer/layers` | All layers (there is one) |
 | `/ugs/rest/services/{id}/{render}/FeatureServer/0` | Layer description: fields, extent, renderer |
@@ -19,6 +21,11 @@ answer the same request, the server gives ArcGIS Online's answer. The
 
 Each service has one layer, with id 0. The path prefix `/ugs/rest/services` is fixed. There is no
 token service.
+
+The services directory and its folders answer as ArcGIS Server does: with `f=json` or `f=pjson`,
+the JSON `{"currentVersion", "folders", "services"}`; without `f`, an HTML page with links. The
+directory lists FeatureServers only. ImageServers are a separate service (see
+[ImageServer](imageserver.md)).
 
 The description endpoints accept `f=json` (the default), `f=pjson` (indented) and `callback`
 (JSONP). Another `f` gives error 400. The layer description reports `currentVersion` 12,
