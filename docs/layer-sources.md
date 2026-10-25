@@ -15,6 +15,11 @@ The server reads the source again every `CACHE_TTL` seconds (default 300), so yo
 remove a layer without a restart. If a refresh fails, the server keeps the last good list and
 tries again after 10 seconds.
 
+Each http(s) read of the catalog or of a render document adds `_cb=<unix seconds>` to the URL, so
+a CDN in front of the file sends the current copy. The CDN must keep the query string in its
+cache key: a Cloud CDN backend bucket drops `_cb` unless you add it with
+`--cache-key-query-string-whitelist=_cb`. Data file reads do not get `_cb`.
+
 The source gives only ids, titles, file locations and renders. The geometry type, extent and
 fields come from each file's GeoParquet metadata and schema.
 

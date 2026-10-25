@@ -171,6 +171,8 @@ can answer repeated tiles and layer descriptions without reaching the server.
 - Forward `Accept-Encoding`, or let the CDN compress. The server sends `Vary: Accept-Encoding`.
 - Set `PUBLIC_URL` to the CDN URL, so `/` lists URLs that clients can reach.
 - POST queries are not cacheable. ArcGIS clients use GET for most tile and identify requests.
+- The server reads its catalog and render documents past the CDN cache (see
+  [layer sources](layer-sources.md)). It sends new data within `CACHE_TTL` of a change.
 
 Also put the data files on a CDN or a server near the service. Each cold read is one or more
 range requests, so the latency to the data sets the time of a cold request.

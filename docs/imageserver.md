@@ -45,14 +45,17 @@ Each answer has an `ETag`, a hash of the build (`GIT_SHA`, else a hash of the pa
 the titiler, rio-tiler and rasterio versions), the STAC item, the COG's own `ETag` (or
 `Last-Modified` and size, from a HEAD request every `CACHE_TTL`; a failed HEAD keeps the last one)
 and the request. A COG rewritten in place or a new build changes it. `If-None-Match` is checked
-before the COG is read.
+before the COG is read. The server reads the COG at its href plus `?v=<version>`, so the GDAL
+`/vsicurl/` cache does not use blocks of the old file.
 
 ## Layer sources
 
 `STAC_COLLECTION_URL` is one or more STAC ItemCollections (`items.json`), comma separated. Each
 item that has a GeoTIFF asset under one of `ASSET_KEYS` (default `visual,cog,data`, first match
-wins) is a service, with the item `id` as its id. The list is read again every `CACHE_TTL`
-seconds in the background.
+wins) is a service, with the item `id` as its id. The first request after `CACHE_TTL` seconds
+reads the list again before it answers. If the read fails, the server keeps the last good list
+and tries again after 10 seconds. Each http(s) read adds `_cb=<unix seconds>`, as the
+[FeatureServer does](layer-sources.md).
 
 The service description uses `properties.description`, else `properties.title`, as its
 description, and `properties["ugs:author"]` as its `copyrightText`.

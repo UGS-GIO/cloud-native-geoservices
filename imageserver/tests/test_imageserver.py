@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -330,11 +331,11 @@ def test_busy_export_does_not_wait(data_dir, monkeypatch):
     entered, release = threading.Event(), threading.Event()
     real = ImageServerFactory.open
 
-    def hold(self, entry):
+    def hold(self, entry, layer):
         if not entered.is_set():
             entered.set()
             release.wait(5)
-        return real(self, entry)
+        return real(self, entry, layer)
 
     monkeypatch.setattr(ImageServerFactory, "open", hold)
     first = threading.Thread(target=export, args=(c,))
@@ -378,6 +379,37 @@ def test_catalog_last_url_wins(tmp_path):
         f.write_text(json.dumps({"items": [{"id": "a", "assets": {"cog": {"href": f"{i}.tif"}}}]}))
         urls.append(str(f))
     assert Catalog(urls, ["cog"], 300).get("a").item["assets"]["cog"]["href"].endswith("2.tif")
+
+
+def test_catalog_reads_past_the_cdn_on_the_request_after_ttl():
+    urls, ids, status = [], ["a"], [200]
+
+    def handler(req):
+        urls.append(str(req.url))
+        items = [{"id": i, "assets": {"cog": {"href": f"{i}.tif"}}} for i in ids]
+        return httpx.Response(status[0], json={"items": items})
+
+    cat = Catalog(["https://example.com/items.json?x=1"], ["cog"], 0.05)
+    cat._client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert list(cat.entries()) == ["a"]
+    ids[:] = ["b"]
+    time.sleep(0.06)
+    assert list(cat.entries()) == ["b"]  # on this request, not a later one
+    status[0] = 500
+    time.sleep(0.06)
+    assert list(cat.entries()) == ["b"]  # the last good list
+    assert len(urls) == 3
+    assert all(u.startswith("https://example.com/items.json?x=1&_cb=") for u in urls)
+
+
+def test_open_keys_the_cog_by_its_version():
+    f = ImageServerFactory(catalog=Catalog([], [], 300), reader=lambda url, item, include_assets: item)
+    e = Entry({"id": "a", "assets": {"cog": {"href": "https://example.com/a.tif"}}}, "", "cog", "")
+    item = f.open(e, SimpleNamespace(version="v1"))
+    assert item["assets"]["cog"]["href"] == "https://example.com/a.tif?v=v1"
+    assert e.item["assets"]["cog"]["href"] == "https://example.com/a.tif"
+    local = Entry({"id": "a", "assets": {"cog": {"href": "/data/a.tif"}}}, "", "cog", "")
+    assert f.open(local, SimpleNamespace(version="v1"))["assets"]["cog"]["href"] == "/data/a.tif"
 
 
 def test_key_properties_and_functions(client):
