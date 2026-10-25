@@ -1,12 +1,19 @@
 # cloud-native-geoservices
 
-The `featureserver` command serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online
-Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add each layer by URL.
+Esri GeoServices REST APIs over cloud-native files. The repository has two services. ArcGIS
+Online Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add the layers of each by URL.
 
-It is one Go binary. It reads the files in place, from a local disk or with HTTP range requests
-to a web server, CDN or bucket. There is no database to run and no copy of the data to load.
+| Service | What it serves | Built on |
+|---|---|---|
+| `featureserver` | GeoParquet files as FeatureServer layers | one Go binary |
+| `imageserver` | COGs listed in STAC as ImageServers | Python on titiler and rio-tiler |
 
-## Why use it
+Both read the files in place, from a local disk or with HTTP range requests to a web server, CDN
+or bucket. There is no database to run and no copy of the data to load.
+
+The rest of this page is about `featureserver`. For `imageserver`, see [ImageServer](imageserver.md).
+
+## Why use featureserver
 
 - You keep one copy of the data: the GeoParquet file you already publish.
 - Each request reads only the row groups, pages and columns that it needs. A small map tile on a
@@ -57,3 +64,4 @@ Then [add the layer to Map Viewer or ArcGIS Pro](getting-started.md#add-a-layer-
 - [Querying](querying.md): the query parameters and how they differ from ArcGIS Online.
 - [Performance](performance.md): how reads work, caches, memory and a CDN.
 - [Deployment](deployment.md): Docker and Cloud Run.
+- [ImageServer](imageserver.md): serve COGs as ArcGIS ImageServers.

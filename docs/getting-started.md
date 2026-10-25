@@ -70,6 +70,11 @@ In ArcGIS Pro, select **Add Data** > **Data From Path** and paste the layer URL.
 Experience Builder, StoryMaps and other clients of the ArcGIS Maps SDK for JavaScript use the same
 layer URL. See [Querying](querying.md) for what the query endpoint supports.
 
+### ImageServer
+
+Add an ImageServer the same way, with a URL of the form
+`https://api.geology.utah.gov/ugs/rest/services/{id}/ImageServer`. See [ImageServer](imageserver.md).
+
 ## Next steps
 
 - To serve files from a CDN or a bucket, use a [config file or STAC](layer-sources.md).
