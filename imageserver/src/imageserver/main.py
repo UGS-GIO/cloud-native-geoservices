@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
         catalog=catalog,
         router_prefix=PREFIX,
         cache_ttl=ttl,
+        cdn_ttl=int(os.environ.get("CDN_TTL", str(ttl))),
         max_image=int(os.environ.get("MAX_IMAGE_SIZE", "2048")),
         max_exports=int(os.environ.get("MAX_EXPORTS", "1")),
         export_wait=float(os.environ.get("EXPORT_WAIT", "10")),

@@ -113,6 +113,7 @@ class ImageServerFactory(BaseFactory):
     environment_dependency: Callable[..., dict] = lambda: {}  # noqa: PIE807 (FastAPI needs a signature)
     max_image: int = 2048
     cache_ttl: int = 300
+    cdn_ttl: int = 300
     max_exports: int = 1
     export_wait: float = 10
     _layers: dict = field(factory=dict, init=False)
@@ -246,7 +247,8 @@ class ImageServerFactory(BaseFactory):
         tag = f'"{hashlib.sha256(key.encode()).hexdigest()[:32]}"'
         headers = {
             "ETag": tag,
-            "Cache-Control": f"public, max-age={self.cache_ttl}, stale-while-revalidate={self.cache_ttl}",
+            "Cache-Control": f"public, max-age={self.cache_ttl}, s-maxage={self.cdn_ttl}, "
+            f"stale-while-revalidate={self.cache_ttl}",
         }
         inm = request.headers.get("if-none-match")
         if inm and request.method in ("GET", "HEAD") and matches(inm, tag):

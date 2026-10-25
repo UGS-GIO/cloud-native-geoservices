@@ -249,7 +249,7 @@ def test_unknown_operation_is_the_service(client):
 
 def test_cache_headers(client):
     res = export(client)
-    assert res.headers["cache-control"].startswith("public, max-age=300")
+    assert res.headers["cache-control"].startswith("public, max-age=300, s-maxage=300,")
     again = client.get(res.url, headers={"If-None-Match": res.headers["etag"]})
     assert again.status_code == 304
     assert export(client, bbox="").headers["cache-control"] == "no-store"
@@ -369,6 +369,15 @@ def test_cog_version_from_head(headers, version):
     )
     e = Entry({"assets": {"cog": {"href": "https://example.com/a.tif"}}}, "", "cog", "")
     assert cat.cog_version(e) == version
+
+
+def test_catalog_last_url_wins(tmp_path):
+    urls = []
+    for i in range(3):
+        f = tmp_path / f"{i}.json"
+        f.write_text(json.dumps({"items": [{"id": "a", "assets": {"cog": {"href": f"{i}.tif"}}}]}))
+        urls.append(str(f))
+    assert Catalog(urls, ["cog"], 300).get("a").item["assets"]["cog"]["href"].endswith("2.tif")
 
 
 def test_key_properties_and_functions(client):
