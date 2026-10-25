@@ -3,6 +3,9 @@
 The server is stateless. All of its state is in memory caches that fill again after a restart, so
 you can run as many copies as you need behind a load balancer.
 
+This page is about `featureserver`. To build and run the ImageServer, see
+[ImageServer](imageserver.md#running).
+
 ## Docker
 
 The `Dockerfile` builds a static binary and copies it onto

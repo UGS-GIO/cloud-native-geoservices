@@ -1,5 +1,5 @@
 site_name: cloud-native-geoservices
-site_description: Serve GeoParquet files as ArcGIS FeatureServer layers.
+site_description: Serve GeoParquet files as ArcGIS FeatureServer layers and COGs as ArcGIS ImageServers.
 site_url: https://ugs-gio.github.io/cloud-native-geoservices/
 repo_url: https://github.com/UGS-GIO/cloud-native-geoservices
 repo_name: UGS-GIO/cloud-native-geoservices

@@ -3,6 +3,9 @@
 The server reads only what a request needs from each file, keeps what it read in memory, and
 refuses work it cannot finish rather than run out of memory.
 
+This page is about `featureserver`. For the ImageServer, see
+[ImageServer](imageserver.md#performance).
+
 ## How a read works
 
 ```mermaid

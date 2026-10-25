@@ -73,6 +73,9 @@ asset is a layer. Items without a `data` asset are skipped. The server reads the
 | `assets.data.href` | The GeoParquet file |
 | `assets.overview*.href` and `ugs:simplify_tolerance` | [Overviews](#overviews) |
 
+The `ugs:` field names come from the project's first deployment and are fixed in the current
+release.
+
 ```json
 {"items": [
   {"id": "faults",
@@ -92,7 +95,7 @@ asset is a layer. Items without a `data` asset are skipped. The server reads the
 ## Renders
 
 A render is one way to draw a layer. Each render is a separate FeatureServer, at
-`/ugs/rest/services/{id}/{render}/FeatureServer`. A layer with no renders has one render,
+`/ugs/rest/services/{id}/{render}/FeatureServer` (the prefix is fixed). A layer with no renders has one render,
 `default`, which uses a simple default symbol for its geometry type.
 
 `esri_url` points to a JSON document with the same keys as a layer's `drawingInfo`:
