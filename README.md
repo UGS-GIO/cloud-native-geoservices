@@ -115,6 +115,7 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 | `PORT` | 8080 | listen port |
 | `STAC_COLLECTION_URL`, `LAYERS_CONFIG`, `LAYERS_DIR` | | layer source (see above) |
 | `CACHE_TTL` | 300 | seconds: layer list and file-version refresh, and `Cache-Control` |
+| `CDN_TTL` | `CACHE_TTL` | seconds a CDN keeps a response (`s-maxage`) |
 | `PUBLIC_URL` | request host | base of the URLs `/` lists |
 | `DECODED_CACHE_MB` | 512 or 10% of memory | decoded column values |
 | `SHAPE_CACHE_MB` | 512 or 15% | simplified geometry per zoom step |

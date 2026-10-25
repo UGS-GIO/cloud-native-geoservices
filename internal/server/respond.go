@@ -126,7 +126,11 @@ func notModified(r *http.Request, tag string) string {
 func (s *Server) send(w http.ResponseWriter, r *http.Request, out *encoded, tag string) {
 	h := w.Header()
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
-		h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d, stale-while-revalidate=%d", s.CacheTTL, s.CacheTTL))
+		cdn := s.CDNTTL
+		if cdn == 0 {
+			cdn = s.CacheTTL
+		}
+		h.Set("Cache-Control", fmt.Sprintf("public, max-age=%d, s-maxage=%d, stale-while-revalidate=%d", s.CacheTTL, cdn, s.CacheTTL))
 	}
 	if tag != "" {
 		h.Set("ETag", tag)

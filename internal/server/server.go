@@ -36,6 +36,7 @@ type Limits struct {
 type Server struct {
 	Provider  *provider.Provider
 	CacheTTL  int    // seconds, for Cache-Control
+	CDNTTL    int    // seconds a shared cache keeps a response (s-maxage); CacheTTL when 0
 	PublicURL string // base for the URLs `/` lists; the request's host when empty
 	Limits    Limits
 	Log       *slog.Logger
