@@ -1,7 +1,8 @@
 # cloud-native-geoservices
 
-Esri GeoServices REST APIs over cloud-native files. The repository has two services. ArcGIS
-Online Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add the layers of each by URL.
+Serve cloud-native geospatial files as Esri GeoServices REST endpoints. ArcGIS Online Map Viewer,
+Experience Builder, StoryMaps and ArcGIS Pro add the layers by URL, as they add any ArcGIS Server
+layer.
 
 | Service | What it serves | Built on |
 |---|---|---|
@@ -9,7 +10,8 @@ Online Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add the laye
 | `imageserver` | COGs listed in STAC as ImageServers | Python on titiler and rio-tiler |
 
 Both read the files in place, from a local disk or with HTTP range requests to a web server, CDN
-or bucket. There is no database to run and no copy of the data to load.
+or bucket. There is no database and no copy of the data to load. Both services are stateless, so
+they can scale to zero on a platform such as Cloud Run.
 
 The rest of this page is about `featureserver`. For `imageserver`, see [ImageServer](imageserver.md).
 
@@ -40,21 +42,24 @@ flowchart LR
 
 ## Quick start
 
-Serve a folder of GeoParquet files. Each `*.parquet` file becomes a layer.
+The repository has three sample GeoParquet files in `testdata/`. Serve them with Go 1.26.3 or
+later:
 
 ```bash
-go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest
-LAYERS_DIR=./data featureserver
+git clone https://github.com/UGS-GIO/cloud-native-geoservices
+cd cloud-native-geoservices
+LAYERS_DIR=./testdata go run ./cmd/featureserver
 ```
 
 Open `http://localhost:8080/`. The page lists each layer and its URL:
 
-```json
-{"layers": [{"topic": "faults", "render": "default", "title": "faults", "styled": false,
-  "url": "http://localhost:8080/ugs/rest/services/faults/default/FeatureServer/0"}]}
+```text
+{"layers": [{"topic": "qfaults", "render": "default", "title": "qfaults", "styled": false,
+  "url": "http://localhost:8080/ugs/rest/services/qfaults/default/FeatureServer/0"}, ...]}
 ```
 
-Then [add the layer to Map Viewer or ArcGIS Pro](getting-started.md#add-a-layer-to-arcgis).
+To serve your own data, set `LAYERS_DIR` to a folder of GeoParquet files. Then
+[add a layer to Map Viewer or ArcGIS Pro](getting-started.md#add-a-layer-to-arcgis).
 
 ## Next steps
 
@@ -65,3 +70,9 @@ Then [add the layer to Map Viewer or ArcGIS Pro](getting-started.md#add-a-layer-
 - [Performance](performance.md): how reads work, caches, memory and a CDN.
 - [Deployment](deployment.md): Docker and Cloud Run.
 - [ImageServer](imageserver.md): serve COGs as ArcGIS ImageServers.
+
+## Who uses it
+
+The [Utah Geological Survey](https://geology.utah.gov) maintains the project and runs it in
+production for its geologic maps and data. Its public services under
+`https://api.geology.utah.gov/ugs/rest/services/` are an example deployment.

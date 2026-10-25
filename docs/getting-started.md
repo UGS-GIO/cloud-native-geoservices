@@ -18,6 +18,26 @@ cd cloud-native-geoservices
 docker build -t featureserver .
 ```
 
+## Try the sample data
+
+The repository has three sample GeoParquet files in `testdata/`: `qfaults` (lines), `geolunits`
+(polygons) and `wells` (points). From the repository root:
+
+```bash
+LAYERS_DIR=./testdata go run ./cmd/featureserver
+```
+
+Check a layer with a count query:
+
+```bash
+curl 'http://localhost:8080/ugs/rest/services/qfaults/default/FeatureServer/0/query?where=1=1&returnCountOnly=true&f=json'
+```
+
+The answer is `{"count":300}`.
+
+`testdata/items.json` is a STAC ItemCollection for the same files, with titles and two renders on
+`wells`. Serve it with `STAC_COLLECTION_URL=testdata/items.json`.
+
 ## Serve a folder
 
 Put your GeoParquet files in one folder. Each `*.parquet` file is a layer, and its file name
@@ -40,14 +60,8 @@ Open `http://localhost:8080/`. It lists each layer with its URL. A layer URL has
 http://localhost:8080/ugs/rest/services/{id}/{render}/FeatureServer/0
 ```
 
-A layer with no renders has the render `default`. To add symbols, see
-[renders](layer-sources.md#renders).
-
-Check a layer with a count query:
-
-```bash
-curl 'http://localhost:8080/ugs/rest/services/faults/default/FeatureServer/0/query?where=1=1&returnCountOnly=true&f=json'
-```
+The path prefix `/ugs/rest/services` is fixed in the current release. A layer with no renders has
+the render `default`. To add symbols, see [renders](layer-sources.md#renders).
 
 ## Add a layer to ArcGIS
 
@@ -73,7 +87,7 @@ layer URL. See [Querying](querying.md) for what the query endpoint supports.
 ### ImageServer
 
 Add an ImageServer the same way, with a URL of the form
-`https://api.geology.utah.gov/ugs/rest/services/{id}/ImageServer`. See [ImageServer](imageserver.md).
+`https://images.example.com/ugs/rest/services/{id}/ImageServer`. See [ImageServer](imageserver.md).
 
 ## Next steps
 

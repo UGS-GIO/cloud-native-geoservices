@@ -45,7 +45,7 @@ To fix a gap, change the server, then remove its entry.
 
 | Tier | Layers | Where the data is | When it runs |
 |---|---|---|---|
-| Small | Three Utah layers: a point, a line and a polygon layer | `testdata/conformance/layers/` in git | `go test ./...`, so every CI run |
+| Small | Three public layers from the Utah SGID: a point, a line and a polygon layer | `testdata/conformance/layers/` in git | `go test ./...`, so every CI run |
 | Large | Two national layers | The `conformance-data` release asset | Nightly, in the `conformance-large` workflow |
 
 `testdata/conformance/layers.json` lists the reference layers of each tier, their license, and the

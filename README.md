@@ -1,6 +1,9 @@
 # cloud-native-geoservices
 
-Esri GeoServices REST APIs over cloud-native files, by the Utah Geological Survey.
+Serve cloud-native geospatial files as Esri GeoServices REST endpoints. ArcGIS clients add the
+layers by URL. There is no database, and the services are stateless, so they can scale to zero.
+
+Documentation: <https://ugs-gio.github.io/cloud-native-geoservices/>
 
 The `featureserver` command serves GeoParquet files as ArcGIS FeatureServer layers. ArcGIS Online
 Map Viewer, Experience Builder, StoryMaps and ArcGIS Pro can add them by URL. It is one Go binary.
@@ -17,7 +20,15 @@ It is a Python service on titiler and rio-tiler, with its own image. See
 
 ## Quickstart
 
-A folder of GeoParquet files, one layer per file:
+Serve the sample GeoParquet files in `testdata/`, one layer per file:
+
+```bash
+LAYERS_DIR=./testdata go run ./cmd/featureserver
+# in another shell; the answer is {"count":300}
+curl 'http://localhost:8080/ugs/rest/services/qfaults/default/FeatureServer/0/query?where=1=1&returnCountOnly=true&f=json'
+```
+
+A folder of your own GeoParquet files, with Go or Docker:
 
 ```bash
 LAYERS_DIR=./data go run ./cmd/featureserver
@@ -34,6 +45,7 @@ go install github.com/UGS-GIO/cloud-native-geoservices/cmd/featureserver@latest
 A STAC ItemCollection (`items.json`), local or over https:
 
 ```bash
+STAC_COLLECTION_URL=testdata/items.json go run ./cmd/featureserver
 STAC_COLLECTION_URL=https://example.com/stac/items.json go run ./cmd/featureserver
 ```
 
@@ -66,6 +78,8 @@ fields are also read:
   generalized copy of the data. A small-scale request reads the coarsest overview that is still
   finer than the request. The layer lists the overviews' zoom levels in `multiScaleGeometryInfo`,
   as an ArcGIS Online layer with optimized drawing does.
+
+The `ugs:` field names come from the project's first deployment and are fixed.
 
 **Config.** URLs that are relative are resolved against the location of the config file.
 
@@ -197,7 +211,7 @@ The test serves the copy, sends the same requests and compares the answers. Row 
 where the request sets one, and numbers match within a tolerance. Every difference must be listed
 in `known_gaps.json` with a reason, and a listed gap that no longer happens fails too.
 
-- Small tier: three Utah layers (point, line, polygon) in `testdata/conformance/layers`. It runs
+- Small tier: three public layers from the Utah SGID (point, line, polygon) in `testdata/conformance/layers`. It runs
   in `go test ./...`.
 - Large tier: two national layers. The data is a release asset, not in git. A nightly workflow
   (`conformance-large.yml`) downloads it and runs `TestLarge`, which also logs timings.
@@ -240,6 +254,12 @@ go test ./internal/where -fuzz FuzzParse        # also FuzzFromWKB (geom), FuzzR
 | `internal/js` | JavaScript conversion and comparison rules |
 | `internal/jsonx`, `internal/lru` | ordered JSON writer; byte-bounded LRU |
 | `conformance`, `cmd/conformance-record` | comparison with recorded Esri answers; the recorder |
+
+## Who uses it
+
+The [Utah Geological Survey](https://geology.utah.gov) maintains the project and runs it in
+production. Its public services under `https://api.geology.utah.gov/ugs/rest/services/` are an
+example deployment.
 
 ## AI use
 

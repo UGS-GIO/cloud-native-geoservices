@@ -2,7 +2,8 @@
 
 `imageserver/` serves Cloud Optimized GeoTIFFs as ArcGIS ImageServers, so ArcGIS Online Map
 Viewer, StoryMaps, Experience Builder and Field Maps can add a COG by URL:
-`https://.../ugs/rest/services/{id}/ImageServer`. It is a Python service (FastAPI) built on
+`https://images.example.com/ugs/rest/services/{id}/ImageServer`. The path prefix
+`/ugs/rest/services` is fixed in the current release. It is a Python service (FastAPI) built on
 Development Seed's [titiler](https://github.com/developmentseed/titiler) and
 [rio-tiler](https://github.com/cogeotiff/rio-tiler). It reads the COGs in place with HTTP range
 requests and renders each request on demand. There is no tile cache to build; the CDN caches the
@@ -53,14 +54,18 @@ item that has a GeoTIFF asset under one of `ASSET_KEYS` (default `visual,cog,dat
 wins) is a service, with the item `id` as its id. The list is read again every `CACHE_TTL`
 seconds in the background.
 
-The UGS warehouse COGs are:
+The service description uses `properties.description`, else `properties.title`, as its
+description, and `properties["ugs:author"]` as its `copyrightText`.
 
-| Collection | Asset | Layout |
-|---|---|---|
-| `ugs-rasters/geolmap_24k_series` | `visual` (EPSG:3857); `cog` is the native UTM copy, with a rotated geotransform | RGB, 8 bit, DEFLATE, 512 px tiles, 5 overviews, no nodata |
-| `ugs-publications/*` (`geolmap/cogs/`) | `cog` (EPSG:3857, pixel sizes of zoom 16 or 17) | RGBA (alpha collar), 8 bit, mostly lossy WebP, some DEFLATE, 512 px tiles, 4 to 6 overviews |
+The server was developed against COGs with these layouts:
 
-The rasterio wheel's GDAL reads all of these, WebP included.
+| Asset | Layout |
+|---|---|
+| RGB in EPSG:3857 | 8 bit, DEFLATE, 512 px tiles, 5 overviews, no nodata |
+| RGB in UTM with a rotated geotransform | 8 bit, DEFLATE, 512 px tiles |
+| RGBA in EPSG:3857 (alpha collar) | 8 bit, lossy WebP or DEFLATE, 512 px tiles, 4 to 6 overviews |
+
+The GDAL in the rasterio wheel reads all of these, WebP included.
 
 Only 8-bit rasters are drawn. Other pixel types give an error until there is a rule for how to
 show them (a stretch or a color map).
@@ -97,7 +102,7 @@ CRS that runs past its edge is a boundless read, which skips the overviews: a fu
 ```bash
 cd imageserver
 uv sync --extra dev
-STAC_COLLECTION_URL=https://maps-assets.geology.utah.gov/warehouse/stac/ugs-rasters/geolmap_24k_series/items.json \
+STAC_COLLECTION_URL=https://example.com/stac/items.json \
   uv run uvicorn --factory imageserver.main:create_app --port 8080
 uv run pytest -q
 ```
@@ -118,8 +123,8 @@ to 13.9 s. A low concurrency makes Cloud Run start another instance instead.
 
 ## Performance
 
-Measured in the container (1 CPU, 512 MB) against the warehouse CDN, each request the first to
-its part of the COG:
+Measured in the container (1 CPU, 512 MB) against COGs on a CDN, each request the first to its
+part of the COG:
 
 | Request | Time |
 |---|---|
