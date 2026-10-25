@@ -293,3 +293,62 @@ func TestRestInfoHasNoTokenService(t *testing.T) {
 		t.Errorf("generateToken: %s", res.Status)
 	}
 }
+
+func getText(t *testing.T, u string) (*http.Response, string) {
+	res, err := http.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res, string(b)
+}
+
+func TestServicesDirectory(t *testing.T) {
+	ts := fixture(t)
+	for _, u := range []string{"/ugs/rest/services?f=json", "/ugs/rest/services/?f=pjson"} {
+		res, body := get(t, ts.URL+u)
+		folders, _ := body["folders"].([]any)
+		if res.Header.Get("ETag") == "" || body["currentVersion"] != 12.0 || len(body["services"].([]any)) != 0 ||
+			!slices.Equal(folders, []any{"geolunits", "qfaults", "wells"}) {
+			t.Errorf("%s: %v", u, body)
+		}
+	}
+	for _, u := range []string{"/ugs/rest/services/wells?f=json", "/ugs/rest/services/wells/?f=json"} {
+		_, body := get(t, ts.URL+u)
+		var names []string
+		for _, s := range body["services"].([]any) {
+			m := s.(map[string]any)
+			names = append(names, m["name"].(string)+" "+m["type"].(string))
+		}
+		if len(body["folders"].([]any)) != 0 || !slices.Equal(names, []string{"wells/by-purpose FeatureServer", "wells/by-boxtype FeatureServer"}) {
+			t.Errorf("%s: %v", u, body)
+		}
+	}
+	if _, body := get(t, ts.URL+"/ugs/rest/services/nope?f=json"); errorCode(body) != 404 {
+		t.Errorf("unknown folder: %v", body)
+	}
+	for u, want := range map[string]string{"/ugs/rest/services": `href="/ugs/rest/services/qfaults"`,
+		"/ugs/rest/services/wells": `href="` + ts.URL + `/ugs/rest/services/wells/by-purpose/FeatureServer"`} {
+		res, body := getText(t, ts.URL+u)
+		if !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(body, want) {
+			t.Errorf("%s: %s %s", u, res.Header.Get("Content-Type"), body)
+		}
+	}
+	_, page := getText(t, ts.URL+"/ugs/rest/services/wells")
+	svc := url.QueryEscape(ts.URL + "/ugs/rest/services/wells/by-purpose/FeatureServer")
+	if !strings.Contains(page, `data-url="`+ts.URL+"/ugs/rest/services/wells/by-purpose/FeatureServer\"") ||
+		!strings.Contains(page, "mapviewer/index.html?url="+svc) {
+		t.Errorf("copy URL or Map Viewer link missing: %s", page)
+	}
+}
+
+func TestNotFoundShowsPath(t *testing.T) {
+	ts := fixture(t)
+	for path, want := range map[string]string{"/a/b": "Cannot GET /a/b<", "/a/%3Cscript%3E": "Cannot GET /a/&lt;script&gt;<"} {
+		res, body := getText(t, ts.URL+path)
+		if res.StatusCode != http.StatusNotFound || !strings.Contains(body, want) {
+			t.Errorf("%s: %d %s", path, res.StatusCode, body)
+		}
+	}
+}
