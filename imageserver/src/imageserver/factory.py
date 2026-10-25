@@ -29,7 +29,7 @@ from titiler.core.resources.enums import ImageType
 from titiler.core.utils import render_image
 
 from . import esri
-from .catalog import Catalog, Entry
+from .catalog import Catalog, Entry, with_query
 from .esri import WEB_MERCATOR, EsriError, Layer
 
 DEPENDENCIES = ("titiler.core", "rio-tiler", "rasterio")
@@ -135,8 +135,16 @@ class ImageServerFactory(BaseFactory):
         self.tile()
         self.metadata()  # last: its catch-all route answers any other operation
 
-    def open(self, entry: Entry) -> STACReader:
-        return self.reader(entry.url, item=entry.item, include_assets={entry.asset})
+    def open(self, entry: Entry, layer: Layer) -> STACReader:
+        asset = entry.item["assets"][entry.asset]
+        item = {
+            **entry.item,
+            "assets": {
+                **entry.item["assets"],
+                entry.asset: {**asset, "href": with_query(asset["href"], "v", layer.version)},
+            },
+        }
+        return self.reader(entry.url, item=item, include_assets={entry.asset})
 
     def layer(self, entry: Entry) -> Layer:
         """The COG's description, read again when the item or the COG changes, checked every TTL."""
@@ -152,7 +160,9 @@ class ImageServerFactory(BaseFactory):
             with self._lock:
                 self._layers[id] = (*hit[:2], now, hit[3])
             return hit[3]
-        with Reader(entry.item["assets"][entry.asset]["href"]) as src:
+        version = hashlib.sha256(f"{entry.version}\0{cog}".encode()).hexdigest()[:16]
+        # ?v= gives the GDAL /vsicurl/ cache a new key when the COG is rewritten in place.
+        with Reader(with_query(entry.item["assets"][entry.asset]["href"], "v", version)) as src:
             info = src.info()
             block = src.dataset.block_shapes[0][::-1]
             overviews = src.dataset.overviews(1)
@@ -186,7 +196,7 @@ class ImageServerFactory(BaseFactory):
             overviews=overviews,
             stats=stats if len(stats) == len(bands) else [],
             copyright=props.get("ugs:author", ""),
-            version=hashlib.sha256(f"{entry.version}\0{cog}".encode()).hexdigest()[:16],
+            version=version,
         )
         with self._lock:
             self._layers[id] = (entry.version, cog, now, layer)
@@ -210,7 +220,7 @@ class ImageServerFactory(BaseFactory):
         f = max(o for o in (1, *layer.overviews) if o * o <= max(1, src / out))
         if src / f**2 > max(16 * out, self.max_image**2):
             raise EsriError(400, "Unable to export image", ["The raster has no overviews for this scale"])
-        with rasterio.Env(**env), self.open(entry) as reader:
+        with rasterio.Env(**env), self.open(entry, layer) as reader:
             try:
                 img = reader.part(
                     cut,
@@ -348,7 +358,7 @@ class ImageServerFactory(BaseFactory):
 
             def pixel():
                 value = "NoData"
-                with rasterio.Env(**env), self.open(entry) as src:
+                with rasterio.Env(**env), self.open(entry, layer) as src:
                     try:
                         pt = src.point(x, y, coord_crs=crs, assets=[entry.asset])
                         if bool(numpy.all(pt.mask)):

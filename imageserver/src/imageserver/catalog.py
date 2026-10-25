@@ -1,5 +1,6 @@
 """The rasters served: STAC items with a COG asset, from one or more ItemCollections (items.json),
-read again every TTL. A refresh that fails keeps the last good list, as internal/catalog does."""
+read again on the first request after TTL. A refresh that fails keeps the last good list, as
+internal/catalog does."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import httpx
 
@@ -27,9 +28,17 @@ class Entry:
     version: str  # changes whenever the item's JSON does
 
 
+def with_query(href: str, key: str, value: str) -> str:
+    """href with ?key=value added, for http(s) hrefs only."""
+    if not href.startswith(("http:", "https:")):
+        return href
+    return f"{href}{'&' if '?' in href else '?'}{key}={quote(value, safe='')}"
+
+
 def _get(url: str, client: httpx.Client) -> dict:
     if url.startswith(("http:", "https:")):
-        res = client.get(url)
+        # _cb makes a CDN in front of the URL send the current file, not a cached copy.
+        res = client.get(with_query(url, "_cb", str(int(time.time()))))
         res.raise_for_status()
         return res.json()
     return json.loads(Path(url).read_text())
@@ -67,14 +76,13 @@ def parse(raw: dict, base: str, asset_keys: list[str]) -> list[Entry]:
 
 
 class Catalog:
-    """Serves the last list while a stale one refreshes in the background."""
+    """Reads the list again on the first request after TTL. Other requests wait for that read."""
 
     def __init__(self, urls: list[str], asset_keys: list[str], ttl: float):
         self.urls, self.asset_keys, self.ttl = urls, asset_keys, ttl
         self._lock = threading.Lock()
         self._entries: dict[str, Entry] | None = None
         self._at = 0.0
-        self._refreshing = False
         self._client = httpx.Client(timeout=10)
 
     def _load(self) -> dict[str, Entry]:
@@ -86,24 +94,15 @@ class Catalog:
                 entries[e.item["id"]] = e  # the last of an id wins
         return entries
 
-    def _refresh(self) -> None:
-        try:
-            entries = self._load()
-            with self._lock:
-                self._entries, self._at = entries, time.monotonic()
-        except (httpx.HTTPError, OSError, ValueError):
-            with self._lock:
-                self._at = time.monotonic() - self.ttl + STALE_RETRY
-        finally:
-            self._refreshing = False
-
     def entries(self) -> dict[str, Entry]:
         with self._lock:
             if self._entries is None:
                 self._entries, self._at = self._load(), time.monotonic()
-            elif time.monotonic() - self._at >= self.ttl and not self._refreshing:
-                self._refreshing = True
-                threading.Thread(target=self._refresh, daemon=True).start()
+            elif time.monotonic() - self._at >= self.ttl:
+                try:
+                    self._entries, self._at = self._load(), time.monotonic()
+                except (httpx.HTTPError, OSError, ValueError):
+                    self._at = time.monotonic() - self.ttl + STALE_RETRY
             return self._entries
 
     def get(self, id: str) -> Entry | None:

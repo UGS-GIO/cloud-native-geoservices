@@ -3,8 +3,11 @@ package catalog
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,6 +72,31 @@ func TestRendererVersionFollowsTheFile(t *testing.T) {
 	}
 	if version(`{"type":"simple"}`) == version(`{"type":"uniqueValue"}`) {
 		t.Fatal("a republished renderer kept its version")
+	}
+}
+
+func TestMetadataReadsPastTheCDN(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.Path+"?"+r.URL.RawQuery)
+		if r.URL.Path == "/items.json" {
+			w.Write([]byte(`{"items":[{"id":"a","properties":{"ugs:renders":{"b":{"esri_url":"b.json?x=1"}}},"assets":{"data":{"href":"a.parquet"}}}]}`))
+			return
+		}
+		w.Write([]byte(`{"renderer":{}}`))
+	}))
+	defer srv.Close()
+	c := New(STAC{URL: srv.URL + "/items.json"}, time.Minute)
+	it, err := c.Topic(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	it.Renders[0].EsriURL = srv.URL + "/" + it.Renders[0].EsriURL
+	if _, err := c.Drawing(context.Background(), it, "b"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !strings.HasPrefix(got[0], "/items.json?_cb=") || !strings.HasPrefix(got[1], "/b.json?x=1&_cb=") {
+		t.Fatalf("each metadata read needs a _cb parameter: %q", got)
 	}
 }
 

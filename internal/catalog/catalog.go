@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -165,7 +166,7 @@ func (c *Catalog) getBytes(ctx context.Context, url string) ([]byte, error) {
 	if !isHTTP(url) {
 		return os.ReadFile(url)
 	}
-	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(context.WithoutCancel(ctx), http.MethodGet, pastCDN(url, time.Now()), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +179,16 @@ func (c *Catalog) getBytes(ctx context.Context, url string) ([]byte, error) {
 		return nil, &Error{res.StatusCode, fmt.Sprintf("%d for %s", res.StatusCode, url)}
 	}
 	return io.ReadAll(res.Body)
+}
+
+// pastCDN adds `_cb=<unix seconds>`, so that a CDN in front of the URL does not send a cached
+// copy. The TTL cache keeps the reads to one per key per CACHE_TTL.
+func pastCDN(u string, now time.Time) string {
+	sep := "?"
+	if strings.Contains(u, "?") {
+		sep = "&"
+	}
+	return u + sep + "_cb=" + strconv.FormatInt(now.Unix(), 10)
 }
 
 // ObjectFields splits a JSON object into its keys, in document order.
