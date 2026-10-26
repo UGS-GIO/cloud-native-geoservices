@@ -121,6 +121,15 @@ func TestTolerance(t *testing.T) {
 	if math.Abs(p.Tolerance-0.001) > 1e-12 {
 		t.Errorf("tolerance %v", p.Tolerance)
 	}
+	q := `{"mode":"view","originPosition":"upperLeft","tolerance":111.32}`
+	pq, _ := New(map[string]string{"quantizationParameters": q, "outSR": "102100"}, layer, 2000)
+	if math.Abs(pq.Pixel-0.001) > 1e-12 || pq.Tolerance != 0 {
+		t.Errorf("quantization pixel %v tolerance %v", pq.Pixel, pq.Tolerance)
+	}
+	pe, _ := New(map[string]string{"quantizationParameters": `{"mode":"edit","tolerance":111.32}`}, layer, 2000)
+	if pe.Pixel != 0 {
+		t.Error("edit mode reads full geometry")
+	}
 	pt, _ := New(map[string]string{"maxAllowableOffset": "111.32"}, Layer{Columns: layer.Columns, Point: true}, 2000)
 	if pt.Tolerance != 0 {
 		t.Error("points are not simplified")
