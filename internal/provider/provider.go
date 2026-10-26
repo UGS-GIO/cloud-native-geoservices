@@ -186,7 +186,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	// Small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
 	// than the request (an `overview` asset).
 	source := layer
-	if ov := overview(item, p.Tolerance); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
+	if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
 		if source, err = pr.Open(ctx, ov); err != nil {
 			return nil, err
 		}

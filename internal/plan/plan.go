@@ -7,6 +7,7 @@ package plan
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"regexp"
 	"slices"
@@ -45,6 +46,7 @@ type Plan struct {
 	Geometry       bool
 	Present        bool    // only rows with a geometry count, and the geometry itself is not read
 	Tolerance      float64 // degrees; 0 means none
+	Pixel          float64 // degrees; the view quantization tolerance, which picks an overview only
 	Page           *pq.Page
 	FiltersApplied map[string]bool
 
@@ -256,13 +258,20 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 		p.Geometry = true
 	}
 	p.Present = stats && !p.Geometry
-	offset := js.ParseNumber(params["maxAllowableOffset"])
-	if p.Geometry && !layer.Point && !math.IsInf(offset, 0) && offset > 0 {
-		if geom.Mercator[p.OutSR] {
-			p.Tolerance = offset / 111320
-		} else {
-			p.Tolerance = offset
+	degrees := func(v float64) float64 {
+		if !p.Geometry || layer.Point || math.IsInf(v, 0) || v <= 0 {
+			return 0
 		}
+		if geom.Mercator[p.OutSR] {
+			return v / 111320
+		}
+		return v
+	}
+	p.Tolerance = degrees(js.ParseNumber(params["maxAllowableOffset"]))
+	// Map Viewer and Pro send only the pixel size, as a view quantization tolerance.
+	var q struct{ Mode, Tolerance any }
+	if json.Unmarshal([]byte(params["quantizationParameters"]), &q) == nil && q.Mode != "edit" && q.Mode != 1.0 {
+		p.Pixel = degrees(js.ParseNumber(fmt.Sprint(q.Tolerance)))
 	}
 
 	// Paging is ours when there is no where left to filter by. Rows are stored in feature_id
