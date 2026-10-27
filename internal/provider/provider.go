@@ -211,7 +211,12 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 
 	// At a drawing scale, read past the page: specks are thinned below, as the vector tiles do,
 	// so a dense small-scale tile still fits in one page instead of splitting into hundreds.
-	thin := p.Page != nil && p.Tolerance > 0
+	// Map Viewer gives the drawing scale only as its quantization tolerance.
+	var draw float64
+	if p.Page != nil {
+		draw = max(p.Tolerance, p.Pixel)
+	}
+	thin := draw > 0
 	// An overview's rows are small, so a drawing tile reads all of them rather than cutting the
 	// Hilbert-ordered rows off partway across the tile.
 	readLimit := unlimited
@@ -243,7 +248,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readRows = rows[:limit+1]
 	}
 	spatial, _ := params.Spatial() // Run reports a bad one
-	feats, err := pr.features(ctx, source, p, readRows, thin, nil, spatial)
+	feats, err := pr.features(ctx, source, p, readRows, draw, nil, spatial)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +302,7 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 				read++
 			}
 		}
-		feats, err := pr.features(ctx, source, p, rows[:n], false, known[:n], spatial)
+		feats, err := pr.features(ctx, source, p, rows[:n], 0, known[:n], spatial)
 		rows, known = rows[n:], known[n:]
 		out := make([]query.Feature, len(feats))
 		for i := range feats {
@@ -372,7 +377,9 @@ type shaped struct {
 // specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
 // known to meet the geometry filter, and its geometry is not read; a row whose shape's bounds
 // meet the filter is marked known, so Run does not work them out again.
-func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin bool, known []bool, spatial *query.Spatial) ([]shaped, error) {
+// features reads rows as features; past a drawing tolerance thin, specks sharing a cell of it are
+// thinned to one, a speck being a shape that simplified away or, unsimplified, fits in a cell.
+func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin float64, known []bool, spatial *query.Spatial) ([]shaped, error) {
 	if err := pr.warm(ctx, source, p, rows, known); err != nil {
 		return nil, err
 	}
@@ -404,11 +411,13 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 		if p.Geometry {
 			g = shapes[i].G
 		}
-		if thin && shapes[i].Speck {
+		b := shapes[i].Bound
+		speck := shapes[i].Speck || thin > 0 && g != nil && b.Max[0]-b.Min[0] <= thin && b.Max[1]-b.Min[1] <= thin
+		if thin > 0 && speck {
 			if pt, ok := firstPoint(g); ok {
 				var class string
 				class, key = speckClass(values, p.Columns, i, key)
-				k := cell{math.Floor(pt[0] / p.Tolerance), math.Floor(pt[1] / p.Tolerance), class}
+				k := cell{math.Floor(pt[0] / thin), math.Floor(pt[1] / thin), class}
 				if cells[k] {
 					continue
 				}
@@ -424,7 +433,7 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 			pass, sure := spatial.Decide(shapes[i].Bound)
 			k = pass && sure
 		}
-		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: k}, speck: shapes[i].Speck, bound: shapes[i].Bound})
+		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: k}, speck: speck, bound: b})
 	}
 	return out, nil
 }

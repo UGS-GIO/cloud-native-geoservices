@@ -145,6 +145,15 @@ func TestTile(t *testing.T) {
 	}
 }
 
+func TestTileAtMapViewersTolerance(t *testing.T) {
+	// Map Viewer sends the drawing scale only as the view quantization tolerance.
+	c := load(t, fixture(t), "geolunits", query.Raw{"geometry": "-115,36,-108,43", "resultType": "tile",
+		"quantizationParameters": `{"mode":"view","originPosition":"upperLeft","tolerance":0.01}`})
+	if len(c.Features) != 5 || c.Exceeded {
+		t.Fatalf("%d features, exceeded %v", len(c.Features), c.Exceeded)
+	}
+}
+
 func TestMirror(t *testing.T) {
 	pr := &Provider{Mirror: "/data/"}
 	if got := pr.dataURL("https://maps-assets.example/warehouse/a/a.parquet"); got != "/data/warehouse/a/a.parquet" {
