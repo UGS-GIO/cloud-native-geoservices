@@ -211,10 +211,15 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 
 	// At a drawing scale, read past the page: specks are thinned below, as the vector tiles do,
 	// so a dense small-scale tile still fits in one page instead of splitting into hundreds.
-	// Map Viewer gives the drawing scale only as its quantization tolerance.
+	// Map Viewer gives a tile's drawing scale only as its quantization tolerance. A plain query
+	// at that tolerance is not thinned: it pages through every feature.
 	var draw float64
-	if p.Page != nil {
+	switch {
+	case p.Page == nil:
+	case params["resultType"] == "tile":
 		draw = max(p.Tolerance, p.Pixel)
+	default:
+		draw = p.Tolerance
 	}
 	thin := draw > 0
 	// An overview's rows are small, so a drawing tile reads all of them rather than cutting the
@@ -374,11 +379,10 @@ type shaped struct {
 }
 
 // features reads the plan's columns (and geometry) at rows and builds the features, thinning
-// specks to one per tolerance-sized cell per symbol class when drawing. A known row is already
-// known to meet the geometry filter, and its geometry is not read; a row whose shape's bounds
-// meet the filter is marked known, so Run does not work them out again.
-// features reads rows as features; past a drawing tolerance thin, specks sharing a cell of it are
-// thinned to one, a speck being a shape that simplified away or, unsimplified, fits in a cell.
+// specks to one per thin-sized cell per symbol class when drawing (thin > 0). A speck simplified
+// away, or fits in a cell. A known row is already known to meet the geometry filter, and its
+// geometry is not read; a row whose shape's bounds meet the filter is marked known, so Run does
+// not work them out again.
 func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin float64, known []bool, spatial *query.Spatial) ([]shaped, error) {
 	if err := pr.warm(ctx, source, p, rows, known); err != nil {
 		return nil, err

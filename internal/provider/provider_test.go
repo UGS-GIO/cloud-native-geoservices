@@ -152,6 +152,13 @@ func TestTileAtMapViewersTolerance(t *testing.T) {
 	if len(c.Features) != 5 || c.Exceeded {
 		t.Fatalf("%d features, exceeded %v", len(c.Features), c.Exceeded)
 	}
+	// A query that is not a tile pages through every feature at that tolerance.
+	all := load(t, fixture(t), "geolunits", query.Raw{"geometry": "-115,36,-108,43",
+		"quantizationParameters": `{"mode":"view","originPosition":"upperLeft","tolerance":0.01}`})
+	plain := load(t, fixture(t), "geolunits", query.Raw{"geometry": "-115,36,-108,43"})
+	if len(all.Features) != len(plain.Features) || all.Exceeded != plain.Exceeded {
+		t.Errorf("quantized query %d features, plain %d", len(all.Features), len(plain.Features))
+	}
 }
 
 func TestMirror(t *testing.T) {
