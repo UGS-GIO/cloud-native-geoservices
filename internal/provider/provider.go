@@ -387,8 +387,8 @@ type shaped struct {
 type scratch struct {
 	shapes   []geom.Shape
 	has      []bool
-	state    []uint8 // warm's shape cache lookup of the row: 0 none, 1 a hit, 2 a miss
 	ids      []int64
+	missing  []int // indexes of the rows whose shapes fill reads
 	geomRows []int64
 	classes  map[string]uint64
 	packed   map[uint64]struct{} // specks seen, by packed cell and class number
@@ -404,13 +404,13 @@ const maxPooledRows = 1 << 17
 // asked for, so clearing that much restores it (and drops the geometries, which belong to the
 // shape cache).
 func (s *scratch) release() {
-	if max(cap(s.shapes), cap(s.has), cap(s.state), cap(s.ids), cap(s.geomRows)) > maxPooledRows {
+	if max(cap(s.shapes), cap(s.has), cap(s.ids), cap(s.missing), cap(s.geomRows)) > maxPooledRows {
 		return
 	}
 	clear(s.shapes)
 	clear(s.has)
-	clear(s.state)
 	clear(s.ids)
+	s.missing = s.missing[:0]
 	// Clearing a big map costs its every bucket on each small request after.
 	if len(s.classes)+len(s.packed)+len(s.cells) > 4096 {
 		s.classes, s.packed, s.cells = nil, nil, nil
@@ -443,18 +443,32 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	defer sc.release()
 	// Pooled buffers are all zeros past their length, so these start cleared.
 	n := len(rows)
-	sc.shapes, sc.has, sc.state = slices.Grow(sc.shapes, n)[:n], slices.Grow(sc.has, n)[:n], slices.Grow(sc.state, n)[:n]
-	if err := pr.warm(ctx, source, p, rows, known, sc); err != nil {
+	sc.shapes, sc.has = slices.Grow(sc.shapes, n)[:n], slices.Grow(sc.has, n)[:n]
+	idCol := slices.Index(p.Columns, "feature_id")
+	var cached *geom.Cached
+	if p.Geometry && p.Tolerance > 0 && idCol >= 0 {
+		cached = pr.Shapes.At(source.ID(), p.Tolerance)
+	}
+	// Where feature_id is the row number + 1, the cached shapes are found before anything is
+	// read, so only the others' geometry is fetched; elsewhere the ids come with the attributes.
+	byRow := cached != nil && source.IDIsRow
+	if byRow {
+		sc.find(cached, rows, known, nil, idCol)
+	}
+	if err := pr.warm(ctx, source, p, rows, known, sc, byRow); err != nil {
 		return nil, nil, err
 	}
 	values, err := source.Read(ctx, p.Columns, rows)
 	if err != nil {
 		return nil, nil, err
 	}
-	shapes, has, err := pr.shapes(ctx, source, p, values, rows, known, sc)
-	if err != nil {
+	if p.Geometry && !byRow {
+		sc.find(cached, rows, known, values, idCol)
+	}
+	if err := pr.fill(ctx, source, p, cached, rows, sc); err != nil {
 		return nil, nil, err
 	}
+	shapes, has := sc.shapes, sc.has
 	if p.Present {
 		bbox, err := source.Read(ctx, pq.BBox[:1], rows)
 		if err != nil {
@@ -506,33 +520,24 @@ func props(values *pq.Rows, cols []string, f *shaped) query.Feature {
 	return f.f
 }
 
-// warm fetches the attributes at rows and the geometry shapes will read, together: shapes needs
-// the attributes (feature_id) before it knows which geometry to read. A file whose feature_id is
-// the row number + 1 looks its shapes up by row here; elsewhere every unknown row's is fetched.
-func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool, sc *scratch) error {
+// warm fetches the attributes at rows and, together with them, the geometry fill will read: the
+// rows find left missing, or every unknown row when the ids come with the attributes.
+func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool, sc *scratch, byRow bool) error {
 	geomRows := sc.geomRows[:0]
-	defer func() { sc.geomRows = geomRows }()
 	if p.Geometry {
-		var cached *geom.Cached
-		if p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id") {
-			cached = pr.Shapes.At(source.ID(), p.Tolerance)
-		}
-		for i, r := range rows {
-			if known != nil && known[i] {
-				continue
+		if byRow {
+			for _, i := range sc.missing {
+				geomRows = append(geomRows, rows[i])
 			}
-			if cached != nil {
-				// shapes takes the lookup from here rather than repeating it.
-				sh, ok, found := cached.Lookup(r + 1)
-				if found {
-					sc.shapes[i], sc.has[i], sc.state[i] = sh, ok, 1
-					continue
+		} else {
+			for i, r := range rows {
+				if known == nil || !known[i] {
+					geomRows = append(geomRows, r)
 				}
-				sc.state[i] = 2
 			}
-			geomRows = append(geomRows, r)
 		}
 	}
+	sc.geomRows = geomRows
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return source.Warm(gctx, p.Columns, rows) })
 	if len(geomRows) > 0 {
@@ -603,42 +608,40 @@ func (s *scratch) seen(x, y float64, key []byte) bool {
 	return false
 }
 
-// shapes are the rows' geometries at the plan's tolerance: from the shape cache, reading and
-// simplifying WKB (in parallel) only for the rows it does not hold.
-func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, values *pq.Rows, rows []int64, known []bool, sc *scratch) ([]geom.Shape, []bool, error) {
-	shapes, has := sc.shapes, sc.has
-	if !p.Geometry {
-		return shapes, has, nil
-	}
-	idCol := slices.Index(p.Columns, "feature_id")
-	var cached *geom.Cached
-	if p.Tolerance > 0 && idCol >= 0 {
-		cached = pr.Shapes.At(source.ID(), p.Tolerance)
-	}
-	ids := slices.Grow(sc.ids, len(rows))[:len(rows)]
-	sc.ids = ids
-	var missing []int
-	for i := range rows {
+// find takes the rows' shapes the cache holds, and lists the rest in s.missing with their ids:
+// by row number when values is nil, else from the feature_id column. A known row has a geometry
+// that is not read.
+func (s *scratch) find(cached *geom.Cached, rows []int64, known []bool, values *pq.Rows, idCol int) {
+	s.ids = slices.Grow(s.ids, len(rows))[:len(rows)]
+	missing := s.missing[:0]
+	for i, r := range rows {
 		if known != nil && known[i] {
-			has[i] = true
+			s.has[i] = true
 			continue
 		}
-		if sc.state[i] == 1 {
-			continue
+		switch {
+		case values == nil:
+			s.ids[i] = r + 1
+		case idCol >= 0:
+			s.ids[i], _ = values.Get(idCol, i).(int64)
 		}
-		if idCol >= 0 {
-			ids[i], _ = values.Get(idCol, i).(int64)
-		}
-		if cached != nil && sc.state[i] == 0 {
-			if sh, ok, found := cached.Lookup(ids[i]); found {
-				shapes[i], has[i] = sh, ok
+		if cached != nil {
+			if sh, ok, found := cached.Lookup(s.ids[i]); found {
+				s.shapes[i], s.has[i] = sh, ok
 				continue
 			}
 		}
 		missing = append(missing, i)
 	}
+	s.missing = missing
+}
+
+// fill reads and simplifies the geometry of the rows find left missing (in parallel), caching
+// the shapes when there is a cache.
+func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, cached *geom.Cached, rows []int64, sc *scratch) error {
+	missing := sc.missing
 	if len(missing) == 0 {
-		return shapes, has, nil
+		return nil
 	}
 	missingRows := make([]int64, len(missing))
 	for k, i := range missing {
@@ -646,13 +649,14 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 	}
 	release, err := pr.admit(ctx, source.GeomBytes(missingRows))
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
 	defer release()
 	wkb, err := source.Read(ctx, []string{source.Geom}, missingRows)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
+	shapes, has, ids := sc.shapes, sc.has, sc.ids
 	g, _ := errgroup.WithContext(ctx)
 	workers := runtime.GOMAXPROCS(0)
 	chunk := max(1, (len(missing)+workers-1)/workers)
@@ -674,7 +678,7 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 			return nil
 		})
 	}
-	return shapes, has, g.Wait()
+	return g.Wait()
 }
 
 // admit waits for room to read about n bytes of geometry.
