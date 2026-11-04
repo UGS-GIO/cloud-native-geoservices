@@ -128,32 +128,35 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		}
 	}
 	// The GeoParquet 1.1 covering: a struct column whose leaves stand in for the bbox_* columns.
-	covering := map[string]string{} // leaf path -> bbox_* name
 	paths := geo.Columns[l.Geom].Covering.BBox
 	if len(paths) == 0 {
 		// A struct named bbox without metadata, as GeoParquet 2.0 allows leaving it out.
 		paths = map[string][]string{"xmin": {"bbox", "xmin"}, "ymin": {"bbox", "ymin"},
 			"xmax": {"bbox", "xmax"}, "ymax": {"bbox", "ymax"}}
 	}
+	nested := map[string]leaf{} // the covering's leaves, by bbox_* name
+	covers := map[int]bool{}    // their column indexes
 	for k, path := range paths {
-		if slices.Contains(BBox, "bbox_"+k) && len(path) > 0 {
-			covering[strings.Join(path, ".")] = "bbox_" + k
+		c := pf.Root()
+		for _, name := range path {
+			if c = c.Column(name); c == nil {
+				break
+			}
+		}
+		if name := "bbox_" + k; c != nil && c.Leaf() && slices.Contains(BBox, name) {
+			el := elements[c.Index()]
+			kind, conv := converter(el, false)
+			nested[name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+			covers[c.Index()] = true
 		}
 	}
-	nested := map[string]leaf{} // the covering's leaves, by bbox_* name
-	for _, c := range leaves(pf.Root()) {
+	for _, c := range pf.Root().Columns() {
+		if !c.Leaf() || covers[c.Index()] {
+			continue // nested leaves are not read but for the covering, which stands in below
+		}
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		lf := leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
-		path := c.Path()
-		if name := covering[strings.Join(path, ".")]; name != "" {
-			nested[name] = lf
-			continue
-		}
-		if len(path) > 1 {
-			continue // other nested leaves are not read
-		}
-		l.leaves[el.Name] = lf
+		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
@@ -211,19 +214,6 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		l.Paged = md.RowGroups[0].Columns[gl.index].OffsetIndexOffset != 0
 	}
 	return l, nil
-}
-
-// leaves are the leaf columns under c, in schema order.
-func leaves(c *parquet.Column) []*parquet.Column {
-	var out []*parquet.Column
-	for _, k := range c.Columns() {
-		if k.Leaf() {
-			out = append(out, k)
-		} else {
-			out = append(out, leaves(k)...)
-		}
-	}
-	return out
 }
 
 // stat is a row group's min or max statistic for a numeric column, NaN when absent.

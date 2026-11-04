@@ -254,7 +254,7 @@ var scratches = sync.Pool{New: func() any { return new(scratch) }}
 const maxPooled = 8 << 20
 
 func (s *scratch) release() {
-	if cap(s.coords)*8 > maxPooled || cap(s.body) > maxPooled || cap(s.fb) > maxPooled || cap(s.gb) > maxPooled {
+	if max(cap(s.coords)*8, cap(s.lengths)*4, cap(s.body), cap(s.fb), cap(s.vb), cap(s.gb)) > maxPooled {
 		return
 	}
 	scratches.Put(s)
@@ -336,7 +336,8 @@ func (s *scratch) stepsOf(g *geom.Esri, t *geom.Transform) *steps {
 	s.lengths, s.coords = lengths, coords
 	var st *steps
 	if ok {
-		st = &steps{lengths: packed(nil, 2, lengths, length), first: make([][2]int64, len(lengths)), off: make([]int, len(lengths)+1)}
+		st = &steps{lengths: packed(nil, 2, lengths, length), first: make([][2]int64, len(lengths)), off: make([]int, len(lengths)+1),
+			rest: make([]byte, 0, 2*len(coords))} // a step is a byte or two per axis
 		at := 0
 		for j, n := range lengths {
 			st.first[j] = [2]int64{coords[at], coords[at+1]}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"sort"
 
 	"golang.org/x/sync/errgroup"
@@ -109,7 +110,8 @@ func (l *Layer) spans(rows []int64) ([]rgSpan, error) {
 		sp := rgSpan{g: l.groupOf(rows[i]), from: i}
 		start := l.Groups[sp.g].Start
 		end := start + l.Groups[sp.g].Rows
-		j := i + sort.Search(len(rows)-i, func(k int) bool { return rows[i+k] >= end })
+		j, _ := slices.BinarySearch(rows[i:], end)
+		j += i
 		sp.rel = make([]int64, j-i)
 		for k := range sp.rel {
 			sp.rel[k] = rows[i+k] - start

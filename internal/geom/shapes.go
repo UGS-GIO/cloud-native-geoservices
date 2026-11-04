@@ -2,6 +2,7 @@ package geom
 
 import (
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -28,17 +29,18 @@ type stepKey struct {
 type step struct {
 	mu sync.RWMutex
 	// Feature ids are row numbers, and a tile's rows are near one another in the file's spatial
-	// order, so a step holds its ids in chunks of neighbours, looked up by index rather than
-	// hashed; ids past the chunks go in the maps.
+	// order, so a step holds its ids in chunks of neighbours, found by index rather than hashed.
 	chunks []*chunk
-	shapes map[int64]Shape
-	none   map[int64]bool
+	far    map[int64]*chunk // chunks of ids at or past maxChunked, or negative
+	// pending is what shapes' Web Mercator copies and encodings came to since the step was last
+	// charged; At charges it, once a request, rather than every shape locking the cache.
+	pending atomic.Int64
 }
 
 const (
 	chunkBits  = 7
 	chunkLen   = 1 << chunkBits
-	maxChunked = 1 << 26 // larger ids go in the maps
+	maxChunked = 1 << 26
 )
 
 type chunk struct {
@@ -68,35 +70,66 @@ func (s *Shapes) At(file string, tolerance float64) *Cached {
 	defer s.mu.Unlock()
 	e, ok := s.steps.Get(key)
 	if !ok {
-		e = &step{shapes: map[int64]Shape{}, none: map[int64]bool{}}
+		e = &step{}
 		s.steps.Put(key, e, 0)
+	} else if n := e.pending.Swap(0); n != 0 {
+		s.steps.Grow(key, n)
 	}
 	return &Cached{s, key, e}
 }
+
+// slot is id's chunk and index in it, making the chunk when create is set; n is the bytes that
+// took. Callers hold the step's lock: a read lock without create.
+func (st *step) slot(id int64, create bool) (ch *chunk, i int, n int64) {
+	k, i := id>>chunkBits, int(id&(chunkLen-1))
+	if id >= 0 && id < maxChunked {
+		if k < int64(len(st.chunks)) && st.chunks[k] != nil {
+			return st.chunks[k], i, 0
+		}
+		if !create {
+			return nil, i, 0
+		}
+		if k >= int64(len(st.chunks)) {
+			was := cap(st.chunks)
+			st.chunks = slices.Grow(st.chunks, int(k)+1-len(st.chunks))[:k+1]
+			n += 8 * int64(cap(st.chunks)-was)
+		}
+		st.chunks[k] = new(chunk)
+		return st.chunks[k], i, n + chunkBytes
+	}
+	if ch := st.far[k]; ch != nil || !create {
+		return ch, i, 0
+	}
+	if st.far == nil {
+		st.far = map[int64]*chunk{}
+	}
+	st.far[k] = new(chunk)
+	return st.far[k], i, chunkBytes + farEntryBytes
+}
+
+// projectedBytes is an empty Projected, rounded up to Go's size class.
+const projectedBytes = (int64(unsafe.Sizeof(Projected{})) + 15) &^ 15
+
+// farEntryBytes is a far map entry's heap, measured: Go maps run between half and seven eighths
+// full.
+const farEntryBytes = int64(unsafe.Sizeof(int64(0))+unsafe.Sizeof((*chunk)(nil))) * 3 / 2
 
 // Lookup returns the cached shape of feature id: found reports a cache hit, ok whether the
 // feature has a geometry.
 func (c *Cached) Lookup(id int64) (sh Shape, ok, found bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if id >= 0 && id < maxChunked {
-		k := id >> chunkBits
-		if k >= int64(len(c.chunks)) || c.chunks[k] == nil {
-			return Shape{}, false, false
-		}
-		ch, i := c.chunks[k], id&(chunkLen-1)
-		switch ch.state[i] {
-		case 1:
-			return ch.shapes[i], true, true
-		case 2:
-			return Shape{}, false, true
-		}
+	ch, i, _ := c.slot(id, false)
+	if ch == nil {
 		return Shape{}, false, false
 	}
-	if sh, hit := c.shapes[id]; hit {
-		return sh, true, true
+	switch ch.state[i] {
+	case 1:
+		return ch.shapes[i], true, true
+	case 2:
+		return Shape{}, false, true
 	}
-	return Shape{}, false, c.none[id]
+	return Shape{}, false, false
 }
 
 // Make simplifies wkb at the step and caches it. ok is false for no geometry.
@@ -106,39 +139,16 @@ func (c *Cached) Make(id int64, wkb []byte) (Shape, bool, error) {
 		return sh, ok, err
 	}
 	c.mu.Lock()
-	var n int64
-	if id >= 0 && id < maxChunked {
-		k := int(id >> chunkBits)
-		if k >= len(c.chunks) {
-			n += 8 * int64(k+1-len(c.chunks))
-			c.chunks = append(c.chunks, make([]*chunk, k+1-len(c.chunks))...)
-		}
-		if c.chunks[k] == nil {
-			c.chunks[k] = new(chunk)
-			n += chunkBytes
-		}
-		ch, i := c.chunks[k], id&(chunkLen-1)
-		switch {
-		case ch.state[i] != 0:
-		case ok:
-			sh.Merc = &Projected{s: c.s, key: c.key}
-			ch.shapes[i], ch.state[i] = sh, 1
-			n += projectedBytes + size(sh.G)
-		default:
-			ch.state[i] = 2
-		}
-	} else {
-		_, dup := c.shapes[id]
-		switch {
-		case dup || c.none[id]:
-		case ok:
-			sh.Merc = &Projected{s: c.s, key: c.key}
-			c.shapes[id] = sh
-			n = shapeBytes + projectedBytes + size(sh.G)
-		default:
-			c.none[id] = true
-			n = noneBytes
-		}
+	ch, i, n := c.slot(id, true)
+	switch {
+	case ch.state[i] != 0:
+	case ok:
+		// Only filled slots get one: the collector scans what it holds, and most chunks are sparse.
+		sh.Merc = &Projected{memo: Memo{st: c.step}}
+		ch.shapes[i], ch.state[i] = sh, 1
+		n += projectedBytes + size(sh.G)
+	default:
+		ch.state[i] = 2
 	}
 	c.mu.Unlock()
 	c.s.steps.Grow(c.key, n)
@@ -152,21 +162,20 @@ type Projected struct {
 	once sync.Once
 	e    Esri
 	ok   bool
-	s    *Shapes // the copy is charged to the entry that holds the shape
-	key  stepKey
 	memo Memo
 }
 
 // Memo holds one value an encoder derives from a shared geometry, for one key (a quantization
 // scale), and replaces it when another key asks: the tiles of one zoom share a scale.
 type Memo struct {
-	v atomic.Pointer[memo]
-	p *Projected
+	v  atomic.Pointer[memo]
+	st *step // charged for what it holds
 }
 
 type memo struct {
 	key [2]float64
 	v   any
+	n   int64
 }
 
 // Get is the value stored for key.
@@ -177,11 +186,13 @@ func (m *Memo) Get(key [2]float64) (any, bool) {
 	return nil, false
 }
 
-// Put stores v, of about n bytes, for key, charging it to the shape's cache entry.
+// Put stores v, of about n bytes, for key, in place of what it held.
 func (m *Memo) Put(key [2]float64, v any, n int64) {
-	m.v.Store(&memo{key, v})
-	if m.p != nil && m.p.s != nil {
-		m.p.s.steps.Grow(m.p.key, n)
+	if old := m.v.Swap(&memo{key, v, n}); old != nil {
+		n -= old.n
+	}
+	if m.st != nil { // a Memo outside the cache charges nothing
+		m.st.pending.Add(n)
 	}
 }
 
@@ -190,22 +201,11 @@ func (p *Projected) Esri(g orb.Geometry) (*Esri, bool) {
 	p.once.Do(func() {
 		m := project.Geometry(orb.Clone(g), ToMercator)
 		p.e, p.ok = ToEsri(m)
-		p.memo.p = p
 		p.e.Memo = &p.memo
-		if p.s != nil {
-			p.s.steps.Grow(p.key, size(m))
-		}
+		p.memo.st.pending.Add(size(m))
 	})
 	return &p.e, p.ok
 }
-
-// Heap per map entry, measured: Go maps run between half and seven eighths full.
-const (
-	shapeBytes = int64(unsafe.Sizeof(int64(0))+unsafe.Sizeof(Shape{})) * 3 / 2
-	noneBytes  = int64(16)
-	// projectedBytes is a shape's empty Projected, rounded up to Go's size class.
-	projectedBytes = (int64(unsafe.Sizeof(Projected{})) + 15) &^ 15
-)
 
 // size is a rough heap size of a geometry: its boxed value and backing arrays.
 func size(g orb.Geometry) int64 {

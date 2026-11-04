@@ -162,13 +162,7 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 			continue
 		}
 		// Rows of a segment that meets the box for sure are hits unread; the rest that may, read.
-		n := int64(0)
-		for _, sg := range segs {
-			if !sg.within(box) && sg.meets(box) {
-				n += sg.to - sg.from
-			}
-		}
-		rel, in := make([]int64, 0, n), [][2]int64(nil)
+		rel, in := []int64{}, [][2]int64(nil)
 		for _, sg := range segs {
 			switch {
 			case sg.within(box):
