@@ -405,3 +405,81 @@ func TestGeoBounds(t *testing.T) {
 		}
 	}
 }
+
+// A GeoParquet 1.1 struct covering prunes and gives the extent as the bbox_* columns do.
+func TestStructCovering(t *testing.T) {
+	type box struct {
+		Xmin float64 `parquet:"xmin"`
+		Ymin float64 `parquet:"ymin"`
+		Xmax float64 `parquet:"xmax"`
+		Ymax float64 `parquet:"ymax"`
+	}
+	type row struct {
+		ID   int64  `parquet:"feature_id"`
+		Name string `parquet:"name"`
+		BBox *box   `parquet:"covering_box,optional"`
+		Geom []byte `parquet:"geom"`
+	}
+	rows := make([]row, 3000)
+	for i := range rows {
+		rows[i].ID, rows[i].Name = int64(i+1), "r"
+		if i%50 == 0 {
+			continue
+		}
+		x := -10 + 20*float64(i)/3000
+		rows[i].BBox = &box{x, 0, x + 0.01, 1}
+	}
+	write := func(meta bool) *Layer {
+		path := filepath.Join(t.TempDir(), "covering.parquet")
+		f, _ := os.Create(path)
+		opts := []parquet.WriterOption{parquet.PageBufferSize(512), parquet.MaxRowsPerRowGroup(1000)}
+		if meta {
+			opts = append(opts, parquet.KeyValueMetadata("geo", `{"version":"1.1.0","primary_column":"geom",`+
+				`"columns":{"geom":{"encoding":"WKB","geometry_types":["Point"],"covering":{"bbox":{`+
+				`"xmin":["covering_box","xmin"],"ymin":["covering_box","ymin"],`+
+				`"xmax":["covering_box","xmax"],"ymax":["covering_box","ymax"]}}}}}`))
+		}
+		w := parquet.NewGenericWriter[row](f, opts...)
+		if _, err := w.Write(rows); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	if l := write(false); l.HasBBox {
+		t.Fatal("a struct not named bbox, without metadata, is no covering")
+	}
+	l := write(true)
+	if !l.HasBBox || l.Extent == nil || l.Extent[0] != -10+20/3000.0 || l.Extent[3] != 1 {
+		t.Fatalf("covering not read: %v %v", l.HasBBox, l.Extent)
+	}
+	for _, c := range l.Columns {
+		if c.Name != "feature_id" && c.Name != "name" {
+			t.Errorf("%s is not an attribute", c.Name)
+		}
+	}
+	b := [4]float64{-1, 0.5, 1, 0.6}
+	got, err := l.Select(context.Background(), Selection{Box: &b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []int64
+	for i, r := range rows {
+		if r.BBox != nil && r.BBox.Xmax >= b[0] && r.BBox.Xmin <= b[2] {
+			want = append(want, int64(i))
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("%d rows, want %d", len(got), len(want))
+	}
+	if !slices.ContainsFunc(l.Groups, func(g Group) bool { return !overlaps(g, &b) }) {
+		t.Error("no row group pruned")
+	}
+}

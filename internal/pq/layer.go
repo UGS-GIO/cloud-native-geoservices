@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -101,7 +102,10 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	var geo struct {
 		Primary string `json:"primary_column"`
 		Columns map[string]struct {
-			Types []string `json:"geometry_types"`
+			Types    []string `json:"geometry_types"`
+			Covering struct {
+				BBox map[string][]string `json:"bbox"`
+			} `json:"covering"`
 		} `json:"columns"`
 	}
 	if v, ok := pf.Lookup("geo"); ok {
@@ -123,16 +127,39 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 			l.Geom = elements[i].Name
 		}
 	}
-	for _, c := range pf.Root().Columns() {
-		if !c.Leaf() {
-			continue
+	// The GeoParquet 1.1 covering: a struct column whose leaves stand in for the bbox_* columns.
+	covering := map[string]string{} // leaf path -> bbox_* name
+	paths := geo.Columns[l.Geom].Covering.BBox
+	if len(paths) == 0 {
+		// A struct named bbox without metadata, as GeoParquet 2.0 allows leaving it out.
+		paths = map[string][]string{"xmin": {"bbox", "xmin"}, "ymin": {"bbox", "ymin"},
+			"xmax": {"bbox", "xmax"}, "ymax": {"bbox", "ymax"}}
+	}
+	for k, path := range paths {
+		if slices.Contains(BBox, "bbox_"+k) && len(path) > 0 {
+			covering[strings.Join(path, ".")] = "bbox_" + k
 		}
+	}
+	nested := map[string]leaf{} // the covering's leaves, by bbox_* name
+	for _, c := range leaves(pf.Root()) {
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+		lf := leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+		path := c.Path()
+		if name := covering[strings.Join(path, ".")]; name != "" {
+			nested[name] = lf
+			continue
+		}
+		if len(path) > 1 {
+			continue // other nested leaves are not read
+		}
+		l.leaves[el.Name] = lf
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
+	}
+	if len(nested) == len(BBox) {
+		maps.Copy(l.leaves, nested)
 	}
 	l.HasBBox = !slices.ContainsFunc(BBox, func(n string) bool { return !l.Has(n) })
 
@@ -184,6 +211,19 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		l.Paged = md.RowGroups[0].Columns[gl.index].OffsetIndexOffset != 0
 	}
 	return l, nil
+}
+
+// leaves are the leaf columns under c, in schema order.
+func leaves(c *parquet.Column) []*parquet.Column {
+	var out []*parquet.Column
+	for _, k := range c.Columns() {
+		if k.Leaf() {
+			out = append(out, k)
+		} else {
+			out = append(out, leaves(k)...)
+		}
+	}
+	return out
 }
 
 // stat is a row group's min or max statistic for a numeric column, NaN when absent.

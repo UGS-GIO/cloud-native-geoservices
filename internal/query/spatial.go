@@ -124,5 +124,5 @@ func (s *Spatial) Match(g orb.Geometry) bool {
 	case "esriSpatialRelWithin":
 		return s.q.Within(g)
 	}
-	return geom.Intersects(s.q.G, g)
+	return s.q.Intersects(g)
 }

@@ -219,3 +219,84 @@ func flat(run []orb.Point) []float64 {
 	}
 	return xy
 }
+
+// Intersects is Intersects(p.G, g). Against a plain box (every map tile) it runs in one pass
+// that usually stops early: a vertex of g in the box, else an edge of g across it, else the
+// box's centre in g.
+func (p *Prepared) Intersects(g orb.Geometry) bool {
+	if !p.box {
+		return Intersects(p.G, g)
+	}
+	switch g := g.(type) {
+	case orb.Point:
+		return p.Bound.Contains(g)
+	case orb.MultiPoint:
+		for _, q := range g {
+			if p.Bound.Contains(q) {
+				return true
+			}
+		}
+		return false
+	case orb.LineString:
+		return p.runMeets(g)
+	case orb.MultiLineString:
+		for _, l := range g {
+			if p.runMeets(l) {
+				return true
+			}
+		}
+		return false
+	case orb.Polygon:
+		return p.polygonMeets(g)
+	case orb.MultiPolygon:
+		for _, q := range g {
+			if p.polygonMeets(q) {
+				return true
+			}
+		}
+		return false
+	}
+	return Intersects(p.G, g)
+}
+
+func (p *Prepared) polygonMeets(g orb.Polygon) bool {
+	if len(g) == 0 {
+		return false
+	}
+	for _, r := range g {
+		if p.runMeets(r) {
+			return true
+		}
+	}
+	// No ring reaches the box: it lies wholly inside the polygon or wholly outside it.
+	return inPolygon(p.Bound.Center(), g)
+}
+
+// runMeets reports a vertex of run in the box or a segment of it across the box.
+func (p *Prepared) runMeets(run []orb.Point) bool {
+	b := p.Bound
+	for _, q := range run {
+		if b.Contains(q) {
+			return true
+		}
+	}
+	for i := 0; i+1 < len(run); i++ {
+		if segmentMeetsBox(run[i], run[i+1], b) {
+			return true
+		}
+	}
+	return false
+}
+
+// segmentMeetsBox reports segment ab touching box b, by separating axes: the box's axes (the
+// bounds overlap) and the segment's normal (the box's corners are not all strictly on one side).
+func segmentMeetsBox(a, c orb.Point, b orb.Bound) bool {
+	if max(a[0], c[0]) < b.Min[0] || min(a[0], c[0]) > b.Max[0] || max(a[1], c[1]) < b.Min[1] || min(a[1], c[1]) > b.Max[1] {
+		return false
+	}
+	dx, dy := c[0]-a[0], c[1]-a[1]
+	side := func(x, y float64) float64 { return dx*(y-a[1]) - dy*(x-a[0]) }
+	s0, s1 := side(b.Min[0], b.Min[1]), side(b.Max[0], b.Min[1])
+	s2, s3 := side(b.Max[0], b.Max[1]), side(b.Min[0], b.Max[1])
+	return !(s0 > 0 && s1 > 0 && s2 > 0 && s3 > 0) && !(s0 < 0 && s1 < 0 && s2 < 0 && s3 < 0)
+}
