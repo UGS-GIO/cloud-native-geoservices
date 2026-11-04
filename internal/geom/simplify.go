@@ -18,6 +18,7 @@ type Shape struct {
 	G     orb.Geometry
 	Bound orb.Bound // Bounds(G)
 	Speck bool
+	Merc  *Projected // set on a cached shape
 }
 
 // keep marks in r.kept which points of r.xs, r.ys survive Douglas-Peucker at tol (degrees).

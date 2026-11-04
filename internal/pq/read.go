@@ -107,10 +107,14 @@ func (l *Layer) spans(rows []int64) ([]rgSpan, error) {
 			return nil, fmt.Errorf("row %d out of range", rows[i])
 		}
 		sp := rgSpan{g: l.groupOf(rows[i]), from: i}
-		for start := l.Groups[sp.g].Start; i < len(rows) && rows[i] < start+l.Groups[sp.g].Rows; i++ {
-			sp.rel = append(sp.rel, rows[i]-start)
+		start := l.Groups[sp.g].Start
+		end := start + l.Groups[sp.g].Rows
+		j := i + sort.Search(len(rows)-i, func(k int) bool { return rows[i+k] >= end })
+		sp.rel = make([]int64, j-i)
+		for k := range sp.rel {
+			sp.rel[k] = rows[i+k] - start
 		}
-		sp.to = i
+		i, sp.to = j, j
 		spans = append(spans, sp)
 	}
 	return spans, nil

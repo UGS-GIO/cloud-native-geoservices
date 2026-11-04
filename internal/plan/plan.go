@@ -174,6 +174,27 @@ var trivial = regexp.MustCompile(`(?i)^\s*(1\s*=\s*1)?\s*$`)
 var featureIDOrder = regexp.MustCompile(`(?i)^\s*feature_id(\s+asc)?\s*$`)
 var nonWord = regexp.MustCompile(`[^\w]`)
 
+// mentioned reports word, of word characters only, in s as a whole word in any case, as
+// `(?i)\bword\b` matches; without compiling a pattern per column on every request.
+func mentioned(s, word string) bool {
+	if word == "" {
+		return strings.IndexFunc(s, isWord) >= 0 // `\b\b` matches beside any word character
+	}
+	for i := 0; i+len(word) <= len(s); i++ {
+		end := i + len(word)
+		if strings.EqualFold(s[i:end], word) && (i == 0 || !isWordByte(s[i-1])) && (end == len(s) || !isWordByte(s[end])) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || '0' <= b && b <= '9' || 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z'
+}
+
+func isWord(r rune) bool { return r < 128 && isWordByte(byte(r)) }
+
 // TrivialWhere reports a where that selects everything.
 func TrivialWhere(params map[string]string) bool {
 	w, ok := params["where"]
@@ -235,8 +256,7 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 	for _, c := range layer.Columns {
 		keep := c.Name == "feature_id" || slices.Contains(out, "*") || slices.Contains(out, strings.ToLower(c.Name))
 		if !keep && m != "" {
-			re, err := regexp.Compile(`(?i)\b` + nonWord.ReplaceAllString(c.Name, "") + `\b`)
-			keep = err == nil && re.MatchString(m)
+			keep = mentioned(m, nonWord.ReplaceAllString(c.Name, ""))
 		}
 		if keep {
 			p.Columns = append(p.Columns, c.Name)

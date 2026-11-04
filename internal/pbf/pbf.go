@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync"
 
 	"google.golang.org/protobuf/encoding/protowire"
 
@@ -55,8 +56,16 @@ func boolean(b []byte, num protowire.Number, v bool) []byte {
 	return varint(b, num, protowire.EncodeBool(v))
 }
 
+// wrap nests body as the result field of a query result, in one allocation of the exact size:
+// the response is often megabytes, and body may be a pooled buffer.
 func wrap(result protowire.Number, body []byte) []byte {
-	return message(nil, 2, message(nil, result, body))
+	inner := protowire.SizeTag(result) + protowire.SizeBytes(len(body))
+	out := make([]byte, 0, protowire.SizeTag(2)+protowire.SizeBytes(inner))
+	out = protowire.AppendTag(out, 2, protowire.BytesType)
+	out = protowire.AppendVarint(out, uint64(inner))
+	out = protowire.AppendTag(out, result, protowire.BytesType)
+	out = protowire.AppendVarint(out, uint64(len(body)))
+	return append(out, body...)
 }
 
 // Count encodes a count result.
@@ -95,7 +104,9 @@ func Features(fs *query.FeatureSet) []byte {
 		types[f.Name] = f.Type
 	}
 
-	var b []byte
+	sc := scratches.Get().(*scratch)
+	defer sc.release()
+	b := sc.body[:0]
 	if !fs.NoGeometry {
 		b = str(b, 1, fs.IDField)
 		u := str(nil, 1, fs.IDField)
@@ -128,8 +139,7 @@ func Features(fs *query.FeatureSet) []byte {
 		fb = str(fb, 3, f.Name)
 		b = message(b, 13, fb)
 	}
-	var fb, vb, gb []byte
-	var sc scratch
+	fb, vb, gb := sc.fb[:0], sc.vb[:0], sc.gb[:0]
 	// Attributes go out sorted by name. Features share one key order, so the sort is worked out
 	// once and reused while the keys match.
 	var keys []string
@@ -156,6 +166,7 @@ func Features(fs *query.FeatureSet) []byte {
 		}
 		b = message(b, 15, fb)
 	}
+	sc.body, sc.fb, sc.vb, sc.gb = b, fb, vb, gb
 	return wrap(1, b)
 }
 
@@ -229,13 +240,34 @@ func value(b []byte, fieldType string, v any) []byte {
 	return b
 }
 
-// scratch holds one geometry's lengths and coordinates, reused from feature to feature.
+// scratch holds the buffers one encoding reuses from feature to feature, and that the next
+// encoding reuses after it: a dense tile otherwise grows them from nothing every time.
 type scratch struct {
-	lengths []uint32
-	coords  []int64
+	lengths          []uint32
+	coords           []int64
+	body, fb, vb, gb []byte
+}
+
+var scratches = sync.Pool{New: func() any { return new(scratch) }}
+
+// maxPooled is the most a pooled buffer keeps; a rare huge tile's buffers go to the collector.
+const maxPooled = 8 << 20
+
+func (s *scratch) release() {
+	if cap(s.coords)*8 > maxPooled || cap(s.body) > maxPooled || cap(s.fb) > maxPooled || cap(s.gb) > maxPooled {
+		return
+	}
+	scratches.Put(s)
 }
 
 func (s *scratch) geometry(b []byte, g *geom.Esri, t *geom.Transform) ([]byte, bool) {
+	if g.Memo != nil && (g.Kind == geom.EsriPolyline || g.Kind == geom.EsriPolygon) {
+		if kx, ky, ok := aligned(t); ok {
+			if st := s.stepsOf(g, t); st != nil {
+				return st.append(b, kx, ky), true
+			}
+		}
+	}
 	lengths, coords, ok := t.Quantized(g, s.lengths[:0], s.coords[:0])
 	if g.Kind == geom.EsriPoint {
 		lengths[0] = 2
@@ -260,6 +292,83 @@ func packed[T any](b []byte, num protowire.Number, xs []T, enc func(T) uint64) [
 	b = protowire.AppendVarint(b, uint64(size))
 	for _, x := range xs {
 		b = protowire.AppendVarint(b, enc(x))
+	}
+	return b
+}
+
+// steps is a cached geometry quantized on a grid of one scale at the origin, encoded: its parts'
+// lengths, each part's first point, and every later point's step from the one before, as packed
+// varints. A tile's grid is that grid shifted by whole steps, so only the first points change
+// from tile to tile, and the tile reuses the rest as bytes.
+type steps struct {
+	lengths []byte     // the whole lengths field
+	first   [][2]int64 // per part
+	rest    []byte     // every part's steps
+	off     []int      // part j's steps are rest[off[j]:off[j+1]]
+}
+
+// aligned reports t as upper-left with its translate on whole steps of its scale from the
+// origin, as Map Viewer's tiles are, and the whole steps of each axis.
+func aligned(t *geom.Transform) (kx, ky int64, ok bool) {
+	if t.LowerLeft || t.XScale <= 0 || t.YScale <= 0 {
+		return 0, 0, false
+	}
+	fx, fy := t.XTranslate/t.XScale, t.YTranslate/t.YScale
+	rx, ry := math.Round(fx), math.Round(fy)
+	// Past this, a point rounding near a half step could land on another step than it would
+	// from the tile's own translate.
+	const slack = 1e-8
+	if math.Abs(fx-rx) > slack || math.Abs(fy-ry) > slack || math.Abs(rx) > 1<<52 || math.Abs(ry) > 1<<52 {
+		return 0, 0, false
+	}
+	return int64(rx), int64(ry), true
+}
+
+// stepsOf is g's steps at t's scale, worked out once per scale; nil when no part survives (the
+// caller then draws a centroid).
+func (s *scratch) stepsOf(g *geom.Esri, t *geom.Transform) *steps {
+	key := [2]float64{t.XScale, t.YScale}
+	if v, ok := g.Memo.Get(key); ok {
+		return v.(*steps)
+	}
+	origin := geom.Transform{XScale: t.XScale, YScale: t.YScale}
+	lengths, coords, ok := origin.Quantized(g, s.lengths[:0], s.coords[:0])
+	s.lengths, s.coords = lengths, coords
+	var st *steps
+	if ok {
+		st = &steps{lengths: packed(nil, 2, lengths, length), first: make([][2]int64, len(lengths)), off: make([]int, len(lengths)+1)}
+		at := 0
+		for j, n := range lengths {
+			st.first[j] = [2]int64{coords[at], coords[at+1]}
+			for _, c := range coords[at+2 : at+2*int(n)] {
+				st.rest = protowire.AppendVarint(st.rest, protowire.EncodeZigZag(c))
+			}
+			st.off[j+1] = len(st.rest)
+			at += 2 * int(n)
+		}
+	}
+	n := int64(64)
+	if st != nil {
+		n += int64(len(st.lengths) + 16*len(st.first) + len(st.rest) + 8*len(st.off))
+	}
+	g.Memo.Put(key, st, n)
+	return st
+}
+
+// append writes the geometry's lengths and coords fields on the grid shifted by kx, ky steps:
+// x counts from the translate, y down from it.
+func (st *steps) append(b []byte, kx, ky int64) []byte {
+	b = append(b, st.lengths...)
+	size := len(st.rest)
+	for _, f := range st.first {
+		size += protowire.SizeVarint(protowire.EncodeZigZag(f[0]-kx)) + protowire.SizeVarint(protowire.EncodeZigZag(f[1]+ky))
+	}
+	b = protowire.AppendTag(b, 3, protowire.BytesType)
+	b = protowire.AppendVarint(b, uint64(size))
+	for j, f := range st.first {
+		b = protowire.AppendVarint(b, protowire.EncodeZigZag(f[0]-kx))
+		b = protowire.AppendVarint(b, protowire.EncodeZigZag(f[1]+ky))
+		b = append(b, st.rest[st.off[j]:st.off[j+1]]...)
 	}
 	return b
 }

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paulmach/orb"
@@ -253,7 +254,7 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readRows = rows[:limit+1]
 	}
 	spatial, _ := params.Spatial() // Run reports a bad one
-	feats, err := pr.features(ctx, source, p, readRows, draw, nil, spatial)
+	feats, values, err := pr.features(ctx, source, p, readRows, draw, nil, spatial)
 	if err != nil {
 		return nil, err
 	}
@@ -281,8 +282,9 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	}
 	c.Features = make([]query.Feature, len(order))
 	for i, k := range order {
-		c.Features[i] = feats[k].f
+		c.Features[i] = props(values, p.Columns, &feats[k])
 	}
+	releaseShaped(feats)
 	return c, nil
 }
 
@@ -307,12 +309,13 @@ func (pr *Provider) stream(ctx context.Context, c *query.Collection, source *pq.
 				read++
 			}
 		}
-		feats, err := pr.features(ctx, source, p, rows[:n], 0, known[:n], spatial)
+		feats, values, err := pr.features(ctx, source, p, rows[:n], 0, known[:n], spatial)
 		rows, known = rows[n:], known[n:]
 		out := make([]query.Feature, len(feats))
 		for i := range feats {
-			out[i] = feats[i].f
+			out[i] = props(values, p.Columns, &feats[i])
 		}
+		releaseShaped(feats)
 		return out, err
 	}
 	feats, err := next()
@@ -376,6 +379,72 @@ type shaped struct {
 	speck bool
 	bound orb.Bound
 	size  float64 // spread, when ranking a tile's features
+	row   int     // index in the rows read, for its attributes
+}
+
+// scratch is what building one request's features needs only while it runs, pooled: a statewide
+// tile reads tens of thousands of rows, and these otherwise grow from nothing every time.
+type scratch struct {
+	shapes   []geom.Shape
+	has      []bool
+	hit      []bool // warm found the row's shape in the shape cache, when looked
+	looked   bool   // warm looked rows up in the shape cache, sizing shapes, has and hit
+	ids      []int64
+	geomRows []int64
+	cells    map[cell]bool // specks seen, when a cell or class does not pack
+	packed   map[uint64]struct{}
+	classes  map[string]uint64
+}
+
+var scratches = sync.Pool{New: func() any { return new(scratch) }}
+
+// maxPooledRows is the most rows a pooled buffer keeps; a rare huge read's go to the collector.
+const maxPooledRows = 1 << 17
+
+// release pools s. A pooled buffer is all zeros: a request writes only within the length it
+// asked for, so clearing that much restores it (and drops the geometries, which belong to the
+// shape cache).
+func (s *scratch) release() {
+	if cap(s.shapes) > maxPooledRows {
+		return
+	}
+	clear(s.shapes)
+	clear(s.has)
+	clear(s.hit)
+	s.looked = false
+	clear(s.ids)
+	// Clearing a big map costs its every bucket on each small request after.
+	if len(s.cells) > 4096 {
+		s.cells = nil
+	} else {
+		clear(s.cells)
+	}
+	if len(s.packed) > 4096 || len(s.classes) > 4096 {
+		s.packed, s.classes = nil, nil
+	} else {
+		clear(s.packed)
+		clear(s.classes)
+	}
+	scratches.Put(s)
+}
+
+var shapedPool = sync.Pool{New: func() any { return []shaped(nil) }}
+
+// releaseShaped pools feats once its features are copied out.
+func releaseShaped(feats []shaped) {
+	if cap(feats) > maxPooledRows {
+		return
+	}
+	clear(feats)
+	shapedPool.Put(feats[:0]) //nolint:staticcheck // a slice header is small next to what it saves
+}
+
+// grow is b, an all-zero pooled buffer, resliced to n elements, or a new one when it is short.
+func grow[T any](b []T, n int) []T {
+	if cap(b) < n {
+		return make([]T, n)
+	}
+	return b[:n]
 }
 
 // features reads the plan's columns (and geometry) at rows and builds the features, thinning
@@ -383,29 +452,30 @@ type shaped struct {
 // away, or fits in a cell. A known row is already known to meet the geometry filter, and its
 // geometry is not read; a row whose shape's bounds meet the filter is marked known, so Run does
 // not work them out again.
-func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin float64, known []bool, spatial *query.Spatial) ([]shaped, error) {
-	if err := pr.warm(ctx, source, p, rows, known); err != nil {
-		return nil, err
+func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, thin float64, known []bool, spatial *query.Spatial) ([]shaped, *pq.Rows, error) {
+	sc := scratches.Get().(*scratch)
+	defer sc.release()
+	if err := pr.warm(ctx, source, p, rows, known, sc); err != nil {
+		return nil, nil, err
 	}
 	values, err := source.Read(ctx, p.Columns, rows)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	shapes, has, err := pr.shapes(ctx, source, p, values, rows, known)
+	shapes, has, err := pr.shapes(ctx, source, p, values, rows, known, sc)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if p.Present {
 		bbox, err := source.Read(ctx, pq.BBox[:1], rows)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for i := range rows {
 			has[i] = bbox.Get(0, i) != nil
 		}
 	}
-	out := make([]shaped, 0, len(rows))
-	cells := map[cell]bool{}
+	out := grow(shapedPool.Get().([]shaped), len(rows))[:0]
 	var key []byte
 	for i := range rows {
 		if (p.Geometry || p.Present) && !has[i] {
@@ -419,34 +489,42 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 		speck := shapes[i].Speck || thin > 0 && g != nil && b.Max[0]-b.Min[0] <= thin && b.Max[1]-b.Min[1] <= thin
 		if thin > 0 && speck {
 			if pt, ok := firstPoint(g); ok {
-				var class string
-				class, key = speckClass(values, p.Columns, i, key)
-				k := cell{math.Floor(pt[0] / thin), math.Floor(pt[1] / thin), class}
-				if cells[k] {
+				key = speckKey(values, p.Columns, i, key)
+				if sc.seen(math.Floor(pt[0]/thin), math.Floor(pt[1]/thin), key) {
 					continue
 				}
-				cells[k] = true
 			}
-		}
-		props := make([]any, len(p.Columns))
-		for c := range p.Columns {
-			props[c] = values.Get(c, i)
 		}
 		k := known != nil && known[i]
 		if !k && spatial != nil && g != nil {
 			pass, sure := spatial.Decide(shapes[i].Bound)
 			k = pass && sure
 		}
-		out = append(out, shaped{f: query.Feature{Props: props, Geom: g, Known: k}, speck: speck, bound: b})
+		f := query.Feature{Geom: g, Known: k}
+		if g != nil {
+			f.Merc = shapes[i].Merc
+		}
+		out = append(out, shaped{f: f, speck: speck, bound: b, row: i})
 	}
-	return out, nil
+	return out, values, nil
+}
+
+// props gives f its attributes, from values at its row: only for the features a response keeps,
+// as a dense tile keeps its largest few thousand of many more.
+func props(values *pq.Rows, cols []string, f *shaped) query.Feature {
+	f.f.Props = make([]any, len(cols))
+	for c := range cols {
+		f.f.Props[c] = values.Get(c, f.row)
+	}
+	return f.f
 }
 
 // warm fetches the attributes at rows and the geometry shapes will read, together: shapes needs
 // the attributes (feature_id) before it knows which geometry to read. A file whose feature_id is
 // the row number + 1 looks its shapes up by row here; elsewhere every unknown row's is fetched.
-func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool) error {
-	var geomRows []int64
+func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, rows []int64, known []bool, sc *scratch) error {
+	geomRows := sc.geomRows[:0]
+	defer func() { sc.geomRows = geomRows }()
 	if p.Geometry {
 		var cached *geom.Cached
 		if p.Tolerance > 0 && source.IDIsRow && slices.Contains(p.Columns, "feature_id") {
@@ -457,7 +535,13 @@ func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, ro
 				continue
 			}
 			if cached != nil {
-				if _, _, found := cached.Lookup(r + 1); found {
+				if !sc.looked {
+					sc.shapes, sc.has, sc.hit = grow(sc.shapes, len(rows)), grow(sc.has, len(rows)), grow(sc.hit, len(rows))
+					sc.looked = true
+				}
+				// shapes takes the hit from here rather than looking it up again.
+				if sh, ok, found := cached.Lookup(r + 1); found {
+					sc.shapes[i], sc.has[i], sc.hit[i] = sh, ok, true
 					continue
 				}
 			}
@@ -481,7 +565,7 @@ func (pr *Provider) warm(ctx context.Context, source *pq.Layer, p *plan.Plan, ro
 
 // speckClass is row i's symbol class: its attributes but feature_id, which the JavaScript provider
 // joined with "|". They compare by AppendKey unless some text holds a "|", then as joined.
-func speckClass(values *pq.Rows, cols []string, i int, buf []byte) (string, []byte) {
+func speckKey(values *pq.Rows, cols []string, i int, buf []byte) []byte {
 	buf = append(buf[:0], 0)
 	for c, name := range cols {
 		if name == "feature_id" {
@@ -495,17 +579,53 @@ func speckClass(values *pq.Rows, cols []string, i int, buf []byte) (string, []by
 					parts = append(parts, js.Join(values.Get(c, i)))
 				}
 			}
-			return "\x01" + strings.Join(parts, "|"), buf
+			return append(append(buf[:0], 1), strings.Join(parts, "|")...)
 		}
 	}
-	return string(buf), buf
+	return buf
+}
+
+// seen reports a speck already kept in cell x, y for symbol class key, and marks this one. The
+// cell and a per-request class number pack into one word, so the common case hashes no string.
+func (s *scratch) seen(x, y float64, key []byte) bool {
+	if s.packed == nil {
+		s.packed, s.classes = map[uint64]struct{}{}, map[string]uint64{}
+	}
+	id, ok := s.classes[string(key)]
+	if !ok {
+		id = uint64(len(s.classes))
+		s.classes[string(key)] = id
+	}
+	const half = 1 << 23
+	if id < 1<<16 && x >= -half && x < half && y >= -half && y < half {
+		k := uint64(int64(x)+half)<<40 | uint64(int64(y)+half)<<16 | id
+		if _, dup := s.packed[k]; dup {
+			return true
+		}
+		s.packed[k] = struct{}{}
+		return false
+	}
+	if s.cells == nil {
+		s.cells = map[cell]bool{}
+	}
+	k := cell{x, y, string(key)}
+	if s.cells[k] {
+		return true
+	}
+	s.cells[k] = true
+	return false
 }
 
 // shapes are the rows' geometries at the plan's tolerance: from the shape cache, reading and
 // simplifying WKB (in parallel) only for the rows it does not hold.
-func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, values *pq.Rows, rows []int64, known []bool) ([]geom.Shape, []bool, error) {
-	shapes := make([]geom.Shape, len(rows))
-	has := make([]bool, len(rows))
+func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, values *pq.Rows, rows []int64, known []bool, sc *scratch) ([]geom.Shape, []bool, error) {
+	var hit []bool
+	if sc.looked {
+		hit = sc.hit
+	} else {
+		sc.shapes, sc.has = grow(sc.shapes, len(rows)), grow(sc.has, len(rows))
+	}
+	shapes, has := sc.shapes, sc.has
 	if !p.Geometry {
 		return shapes, has, nil
 	}
@@ -514,11 +634,15 @@ func (pr *Provider) shapes(ctx context.Context, source *pq.Layer, p *plan.Plan, 
 	if p.Tolerance > 0 && idCol >= 0 {
 		cached = pr.Shapes.At(source.ID(), p.Tolerance)
 	}
-	ids := make([]int64, len(rows))
+	ids := grow(sc.ids, len(rows))
+	sc.ids = ids
 	var missing []int
 	for i := range rows {
 		if known != nil && known[i] {
 			has[i] = true
+			continue
+		}
+		if hit != nil && hit[i] {
 			continue
 		}
 		if idCol >= 0 {

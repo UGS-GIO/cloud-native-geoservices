@@ -162,6 +162,14 @@ cache gets the largest share: a miss there costs a decode and a simplify. With e
 in the cache, a CPU answers about twice as many uncached tile requests. Set the
 variables to give one cache more room. Most of the caches fill only with what clients ask for.
 
+A cached shape also keeps its Web Mercator copy and, per zoom, its encoded tile steps, so a warm
+tile neither projects nor quantizes it again. That roughly doubles what a shape holds. Once a
+zoom's shapes are cached, its decoded geometry is rarely read again, so the decoded cache can be
+small. With 4 CPUs and 8 GiB, on a seeded mix of 12,000 uncached Map Viewer tiles over 11
+layers, `SHAPE_CACHE_MB=2048` with `DECODED_CACHE_MB=256` answered about 800 tiles a second. The
+heap's soft limit is 80% of memory, so memory left past the caches keeps the collector from
+running every second or two.
+
 ## Put a CDN in front
 
 The responses are safe to cache: each has an ETag that changes when the data, the layer entry or
