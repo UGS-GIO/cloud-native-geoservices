@@ -132,6 +132,7 @@ func main() {
 		Reader: pq.NewReader(budget("PAGE_CACHE_MB", 128, 0.03, limit),
 			budget("DECODED_CACHE_MB", 512, 0.10, limit), geometryBudget),
 		Shapes:          geom.NewShapes(budget("SHAPE_CACHE_MB", 512, 0.15, limit)),
+		Ready:           provider.NewReadyCache(budget("READY_CACHE_MB", 256, 0.08, limit)),
 		MaxRecords:      envInt("MAX_RECORDS", 2000),
 		TileMaxRecords:  envInt("TILE_MAX_RECORDS", 8000),
 		MaxGeometryRows: envInt("MAX_GEOMETRY_ROWS", 50000),

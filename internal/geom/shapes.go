@@ -196,16 +196,6 @@ func (m *Memo) Put(key [2]float64, v any, n int64) {
 	}
 }
 
-// InMercator is a Projected for a geometry g already in Web Mercator: its Esri parts are g's.
-func InMercator(g orb.Geometry) *Projected {
-	p := &Projected{}
-	p.once.Do(func() {
-		p.e, p.ok = ToEsri(g)
-		p.e.Memo = &p.memo
-	})
-	return p
-}
-
 // Esri is g, the shape p belongs to, projected to Web Mercator and converted as ToEsri does.
 func (p *Projected) Esri(g orb.Geometry) (*Esri, bool) {
 	p.once.Do(func() {

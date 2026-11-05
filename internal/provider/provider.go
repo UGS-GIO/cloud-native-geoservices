@@ -40,6 +40,8 @@ type Provider struct {
 	Catalog *catalog.Catalog
 	Reader  *pq.Reader
 	Shapes  *geom.Shapes
+	// Ready holds tile-ready levels' rows as tiles write them; without it, tiles read no level.
+	Ready *ReadyCache
 	// MaxRecords is a page, like ArcGIS Server's maxRecordCount (2000).
 	MaxRecords int64
 	// TileMaxRecords: Map Viewer splits a tile whose response exceeds its limit into four and asks
@@ -188,9 +190,9 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	// A Map Viewer tile reads the topic's tile-ready level for its zoom where it has one. Other
 	// small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
 	// than the request (an `overview` asset).
-	source := layer
-	if lod, lp := pr.tileLevel(ctx, item, p, params, maxRecords); lod != nil {
-		source, p = lod, lp
+	source, scale := layer, 0.0
+	if lod, lp, s := pr.tileLevel(ctx, item, p, params, maxRecords); lod != nil {
+		source, p, scale = lod, lp, s
 	} else if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
 		if source, err = pr.Open(ctx, ov); err != nil {
 			return nil, err
@@ -261,7 +263,13 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readRows = rows[:limit+1]
 	}
 	spatial, _ := params.Spatial() // Run reports a bad one
-	feats, values, err := pr.features(ctx, source, p, readRows, draw, nil, spatial)
+	var feats []shaped
+	var values *pq.Rows
+	if scale > 0 {
+		feats, values, err = pr.readyFeatures(ctx, source, scale, p, readRows, draw)
+	} else {
+		feats, values, err = pr.features(ctx, source, p, readRows, draw, nil, spatial)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -278,10 +286,15 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 				feats[i].size = spread(feats[i].bound)
 			}
 		}
-		// A stable sort by size, as indexes: the features are too large to move around.
-		slices.SortFunc(order, func(a, b int) int {
-			return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
-		})
+		if scale > 0 {
+			// A tile-ready level keeps its rows' order: only which features are left matters.
+			order = largest(feats, order, int(limit))
+		} else {
+			// A stable sort by size, as indexes: the features are too large to move around.
+			slices.SortFunc(order, func(a, b int) int {
+				return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
+			})
+		}
 	}
 	c.Exceeded = !tile && (int64(len(feats)) > limit || thin && int64(len(rows)) > readLimit)
 	if int64(len(order)) > limit {
@@ -452,14 +465,8 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	n := len(rows)
 	sc.shapes, sc.has = slices.Grow(sc.shapes, n)[:n], slices.Grow(sc.has, n)[:n]
 	idCol := slices.Index(p.Columns, "feature_id")
-	// A tile-ready level is already drawn for its zoom, in Web Mercator: its shapes are neither
-	// simplified nor cached, and it is thinned in metres.
-	merc := geom.Mercator[source.EPSG]
-	if merc {
-		thin *= metresPerDegree
-	}
 	var cached *geom.Cached
-	if p.Geometry && p.Tolerance > 0 && idCol >= 0 && !merc {
+	if p.Geometry && p.Tolerance > 0 && idCol >= 0 {
 		cached = pr.Shapes.At(source.ID(), p.Tolerance)
 	}
 	// Where feature_id is the row number + 1, the cached shapes are found before anything is
@@ -478,7 +485,7 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	if p.Geometry && !byRow {
 		sc.find(cached, rows, known, values, idCol)
 	}
-	if err := pr.fill(ctx, source, p, cached, rows, sc, merc); err != nil {
+	if err := pr.fill(ctx, source, p, cached, rows, sc); err != nil {
 		return nil, nil, err
 	}
 	shapes, has := sc.shapes, sc.has
@@ -511,9 +518,7 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 				}
 			}
 		}
-		// A tile-ready level's rows are those whose bbox meets the tile, kept as meeting it: its
-		// shapes are not in lon/lat for the exact test, and drawing the few that miss costs nothing.
-		k := known != nil && known[i] || merc
+		k := known != nil && known[i]
 		if !k && spatial != nil && g != nil {
 			pass, sure := spatial.Decide(shapes[i].Bound)
 			k = pass && sure
@@ -653,7 +658,7 @@ func (s *scratch) find(cached *geom.Cached, rows []int64, known []bool, values *
 
 // fill reads and simplifies the geometry of the rows find left missing (in parallel), caching
 // the shapes when there is a cache.
-func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, cached *geom.Cached, rows []int64, sc *scratch, merc bool) error {
+func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, cached *geom.Cached, rows []int64, sc *scratch) error {
 	missing := sc.missing
 	if len(missing) == 0 {
 		return nil
@@ -681,17 +686,9 @@ func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, ca
 			for k := from; k < to; k++ {
 				i := missing[k]
 				var err error
-				switch {
-				case cached != nil:
+				if cached != nil {
 					shapes[i], has[i], err = cached.Make(ids[i], wkb.Bytes(0, k))
-				case merc:
-					if b := wkb.Bytes(0, k); len(b) > 0 {
-						var g orb.Geometry
-						if g, err = geom.ReadWKB(b); err == nil {
-							shapes[i], has[i] = geom.Shape{G: g, Bound: geom.Bounds(g), Merc: geom.InMercator(g)}, true
-						}
-					}
-				default:
+				} else {
 					shapes[i], has[i], err = geom.FromWKB(wkb.Bytes(0, k), p.Tolerance)
 				}
 				if err != nil {
@@ -799,14 +796,14 @@ func lodOf(a catalog.Asset) int {
 	return -1
 }
 
-// tileLevel opens the tile-ready level a Map Viewer tile reads, and plans the request against it:
-// the coarsest level at least as fine as the tile's pixel. It gives nil, so the tile reads as any
-// other request, where the topic has no such level, the level lacks a field the request needs,
-// or the response is not plain Web Mercator.
-func (pr *Provider) tileLevel(ctx context.Context, item *catalog.Item, p *plan.Plan, params query.Raw, maxRecords int64) (*pq.Layer, *plan.Plan) {
-	if params["resultType"] != "tile" || p.Kind != plan.Features || !p.Geometry || len(p.IDs) > 0 || p.Pixel <= 0 ||
+// tileLevel opens the tile-ready level a Map Viewer tile reads, plans the request against it and
+// gives the level's pixel: the coarsest level at least as fine as the tile's pixel. It gives nil,
+// so the tile reads as any other request, where the topic has no such level, the level lacks a
+// field the request needs, or the response is not plain Web Mercator.
+func (pr *Provider) tileLevel(ctx context.Context, item *catalog.Item, p *plan.Plan, params query.Raw, maxRecords int64) (*pq.Layer, *plan.Plan, float64) {
+	if pr.Ready == nil || params["resultType"] != "tile" || p.Kind != plan.Features || !p.Geometry || len(p.IDs) > 0 || p.Pixel <= 0 ||
 		!geom.Mercator[p.OutSR] || params["geometryPrecision"] != "" || params["f"] != "pbf" && params["f"] != "json" {
-		return nil, nil
+		return nil, nil, 0
 	}
 	want := math.Log2(lod0Resolution/(max(p.Tolerance, p.Pixel)*metresPerDegree)) - 1e-6
 	href, best := "", math.MaxInt
@@ -816,17 +813,17 @@ func (pr *Provider) tileLevel(ctx context.Context, item *catalog.Item, p *plan.P
 		}
 	}
 	if href == "" {
-		return nil, nil
+		return nil, nil, 0
 	}
 	lod, err := pr.Open(ctx, href)
-	if err != nil || !geom.Mercator[lod.EPSG] || slices.ContainsFunc(p.Columns, func(c string) bool { return !lod.Has(c) }) {
-		return nil, nil
+	if err != nil || !geom.Mercator[lod.EPSG] || lod.Point || slices.ContainsFunc(p.Columns, func(c string) bool { return !lod.Has(c) }) {
+		return nil, nil, 0
 	}
 	lp, err := plan.New(params, plan.Layer{Columns: lod.Columns, Point: lod.Point, BBox: lod.HasBBox}, maxRecords)
 	if err != nil {
-		return nil, nil
+		return nil, nil, 0
 	}
-	return lod, lp
+	return lod, lp, lod0Resolution / math.Exp2(float64(best))
 }
 
 // mercatorBox is a lon/lat box in Web Mercator.

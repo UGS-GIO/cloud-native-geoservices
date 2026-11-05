@@ -19,6 +19,10 @@ func (f EsriFeature) AppendJSON(buf []byte) []byte { return f.appendJSON(buf, ni
 // appendJSON writes the feature with its geometry on t's grid when t is set, and the centroid AGOL
 // adds when that geometry collapses.
 func (f EsriFeature) appendJSON(buf []byte, t *geom.Transform, scratch *[]int64) []byte {
+	if f.Geom != nil && f.Geom.Ready != nil {
+		e := f.Geom.Ready.Esri()
+		f.Geom = &e
+	}
 	buf = append(buf, `{"attributes":`...)
 	buf = jsonx.Append(buf, jsonx.Obj(f.Attrs))
 	if f.HasGeom {

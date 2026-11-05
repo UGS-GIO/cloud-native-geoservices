@@ -310,7 +310,7 @@ func TestServicesDirectory(t *testing.T) {
 		res, body := get(t, ts.URL+u)
 		folders, _ := body["folders"].([]any)
 		if res.Header.Get("ETag") == "" || body["currentVersion"] != 12.0 || len(body["services"].([]any)) != 0 ||
-			!slices.Equal(folders, []any{"geolunits", "qfaults", "wells"}) {
+			!slices.Equal(folders, []any{"geolunits", "geolunits_tiles", "qfaults", "wells"}) {
 			t.Errorf("%s: %v", u, body)
 		}
 	}

@@ -341,7 +341,7 @@ func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
 }
 
 // ReadWKB reads a little-endian 2D WKB geometry as it is, its points in one array: for a level
-// already drawn for its zoom, which needs no simplifying. A polygon is a multipolygon's member.
+// already drawn for its zoom, which needs no simplifying.
 func ReadWKB(b []byte) (orb.Geometry, error) {
 	r := plainWKB{b: b}
 	n := 0
