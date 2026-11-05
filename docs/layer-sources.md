@@ -155,11 +155,13 @@ geospatial statistics of the first row group. Each file is one geometry type.
 
 These are recommended:
 
-- The bbox covering as four flat columns: `bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`.
-  Without them, the layer extent is not known, and a spatial filter reads the geometry of every
-  row in the row groups it meets. Row groups are then pruned on the geospatial statistics of a
-  `GEOMETRY` or `GEOGRAPHY` column, if the file has them. A row group without them is always
-  read, and a `GEOGRAPHY` box across the antimeridian prunes on latitude only.
+- The bbox covering: four flat columns `bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`, or
+  the GeoParquet 1.1 struct column that the `covering` of the primary geometry column names in
+  the `geo` metadata (without metadata, a struct called `bbox` with fields `xmin`, `ymin`, `xmax`
+  and `ymax`). Without a covering, the layer extent is not known, and a spatial filter reads the
+  geometry of every row in the row groups it meets. Row groups are then pruned on the geospatial
+  statistics of a `GEOMETRY` or `GEOGRAPHY` column, if the file has them. A row group without
+  them is always read, and a `GEOGRAPHY` box across the antimeridian prunes on latitude only.
 - Rows sorted spatially, for example in Hilbert order, with `feature_id` assigned in that order.
 - `feature_id` equal to the row number plus 1. Then the server finds an object id without reading
   the `feature_id` column. Otherwise it reads `feature_id` in the row groups whose statistics may

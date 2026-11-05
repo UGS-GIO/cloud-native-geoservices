@@ -174,6 +174,45 @@ var trivial = regexp.MustCompile(`(?i)^\s*(1\s*=\s*1)?\s*$`)
 var featureIDOrder = regexp.MustCompile(`(?i)^\s*feature_id(\s+asc)?\s*$`)
 var nonWord = regexp.MustCompile(`[^\w]`)
 
+// words are the whole words of s, lowercased: its maximal runs of ASCII word characters, which
+// is what `\b` bounds. A column is mentioned when its name, without its non-word characters, is
+// one of them, as `(?i)\bname\b` would match; s is split once rather than searched per column.
+func words(s string) map[string]bool {
+	out := map[string]bool{}
+	for i := 0; i < len(s); {
+		j := i
+		for j < len(s) && isWordByte(s[j]) {
+			j++
+		}
+		if j > i {
+			out[strings.ToLower(s[i:j])] = true
+			i = j
+		} else {
+			i++
+		}
+	}
+	return out
+}
+
+// mentionedIn reports name among words. A name of no word characters is beside any word, as
+// `\b\b` matches.
+func mentionedIn(words map[string]bool, name string) bool {
+	name = strings.Map(func(r rune) rune {
+		if r < 128 && isWordByte(byte(r)) {
+			return r
+		}
+		return -1
+	}, name)
+	if name == "" {
+		return len(words) > 0
+	}
+	return words[strings.ToLower(name)]
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || '0' <= b && b <= '9' || 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z'
+}
+
 // TrivialWhere reports a where that selects everything.
 func TrivialWhere(params map[string]string) bool {
 	w, ok := params["where"]
@@ -232,11 +271,14 @@ func New(params map[string]string, layer Layer, maxRecords int64) (*Plan, error)
 		}
 	}
 	m := strings.Join(mentions, " ")
+	var said map[string]bool
+	if m != "" {
+		said = words(m)
+	}
 	for _, c := range layer.Columns {
 		keep := c.Name == "feature_id" || slices.Contains(out, "*") || slices.Contains(out, strings.ToLower(c.Name))
 		if !keep && m != "" {
-			re, err := regexp.Compile(`(?i)\b` + nonWord.ReplaceAllString(c.Name, "") + `\b`)
-			keep = err == nil && re.MatchString(m)
+			keep = mentionedIn(said, c.Name)
 		}
 		if keep {
 			p.Columns = append(p.Columns, c.Name)

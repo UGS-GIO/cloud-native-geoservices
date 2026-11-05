@@ -187,6 +187,11 @@ func (l *Layer) inBox(ctx context.Context, box *[4]float64) ([]int64, error) {
 	eg, ectx := errgroup.WithContext(ctx)
 	for k, sp := range spans {
 		start := l.Groups[sp.g].Start
+		n := int64(len(sp.rel))
+		for _, r := range sure[k] {
+			n += r[1] - r[0]
+		}
+		hits[k] = make([]int64, 0, n)
 		for _, r := range sure[k] {
 			for i := r[0]; i < r[1]; i++ {
 				hits[k] = append(hits[k], start+i)

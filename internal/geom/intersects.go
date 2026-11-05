@@ -93,6 +93,10 @@ func disjoint(a, b orb.Geometry) bool {
 func onSegment(s, e, p orb.Point) bool {
 	dxc, dyc := p[0]-s[0], p[1]-s[1]
 	dxl, dyl := e[0]-s[0], e[1]-s[1]
+	if dxl == 0 && dyl == 0 {
+		// A zero-length segment, as a closed ring's last point to its first: only its point.
+		return p == s
+	}
 	if dxc*dyl-dyc*dxl != 0 {
 		return false
 	}

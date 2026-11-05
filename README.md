@@ -102,8 +102,8 @@ so for files on a CDN or in a bucket, use a config file or STAC.
 
 - GeoParquet 1.x or 2.0 with WKB geometry in EPSG:4326.
 - An integer `feature_id` column. It is the object id. Queries by `objectIds` need it.
-- Recommended: the bbox covering columns (`bbox_xmin`, `bbox_ymin`, `bbox_xmax`, `bbox_ymax`),
-  rows sorted spatially (for example Hilbert order), small row groups, and a page index. Without
+- Recommended: the bbox covering, as flat columns (`bbox_xmin`, `bbox_ymin`, `bbox_xmax`,
+  `bbox_ymax`) or the GeoParquet 1.1 `bbox` struct, rows sorted spatially (for example Hilbert order), small row groups, and a page index. Without
   the covering, a spatial filter reads the geometry of every row in the row groups that the
   native geospatial statistics, if any, do not rule out. With the page index, a small
   box reads only the bbox pages it meets, so small pages on those columns help.

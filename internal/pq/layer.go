@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -101,7 +102,10 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	var geo struct {
 		Primary string `json:"primary_column"`
 		Columns map[string]struct {
-			Types []string `json:"geometry_types"`
+			Types    []string `json:"geometry_types"`
+			Covering struct {
+				BBox map[string][]string `json:"bbox"`
+			} `json:"covering"`
 		} `json:"columns"`
 	}
 	if v, ok := pf.Lookup("geo"); ok {
@@ -123,9 +127,32 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 			l.Geom = elements[i].Name
 		}
 	}
+	// The GeoParquet 1.1 covering: a struct column whose leaves stand in for the bbox_* columns.
+	paths := geo.Columns[l.Geom].Covering.BBox
+	if len(paths) == 0 {
+		// A struct named bbox without metadata, as GeoParquet 2.0 allows leaving it out.
+		paths = map[string][]string{"xmin": {"bbox", "xmin"}, "ymin": {"bbox", "ymin"},
+			"xmax": {"bbox", "xmax"}, "ymax": {"bbox", "ymax"}}
+	}
+	nested := map[string]leaf{} // the covering's leaves, by bbox_* name
+	covers := map[int]bool{}    // their column indexes
+	for k, path := range paths {
+		c := pf.Root()
+		for _, name := range path {
+			if c = c.Column(name); c == nil {
+				break
+			}
+		}
+		if name := "bbox_" + k; c != nil && c.Leaf() && slices.Contains(BBox, name) {
+			el := elements[c.Index()]
+			kind, conv := converter(el, false)
+			nested[name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+			covers[c.Index()] = true
+		}
+	}
 	for _, c := range pf.Root().Columns() {
-		if !c.Leaf() {
-			continue
+		if !c.Leaf() || covers[c.Index()] {
+			continue // nested leaves are not read but for the covering, which stands in below
 		}
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
@@ -133,6 +160,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
+	}
+	if len(nested) == len(BBox) {
+		maps.Copy(l.leaves, nested)
 	}
 	l.HasBBox = !slices.ContainsFunc(BBox, func(n string) bool { return !l.Has(n) })
 

@@ -1,6 +1,7 @@
 package query
 
 import (
+	"github.com/UGS-GIO/cloud-native-geoservices/internal/geom"
 	"strings"
 
 	"github.com/paulmach/orb"
@@ -16,6 +17,8 @@ type Feature struct {
 	Props []any
 	Geom  orb.Geometry
 	Known bool // the provider found from its bbox that it meets the geometry filter
+	// Merc, when set, holds Geom in Web Mercator, shared across requests (a cached shape).
+	Merc *geom.Projected
 }
 
 // Collection is what the provider hands a query.

@@ -487,6 +487,12 @@ func (w *winnow) idMatch(ft *Feature) bool {
 	return false
 }
 
+// plainMercator reports output in Web Mercator with no rounding, as every Map Viewer tile asks:
+// the shared projected copy of a cached shape is then the output geometry as it is.
+func (w *winnow) plainMercator() bool {
+	return w.precision == nil && w.scale == 0 && geom.Mercator[w.outSR.Wkid]
+}
+
 // outGeometry projects and rounds a feature's geometry for output.
 func (w *winnow) outGeometry(g orb.Geometry) orb.Geometry {
 	if g == nil {
@@ -542,11 +548,16 @@ func (w *winnow) attrs(ft *Feature) []jsonx.KV {
 func (w *winnow) esriFeatures(idx []int) ([]EsriFeature, bool) {
 	idx = w.sorted(idx)
 	out := make([]EsriFeature, 0, len(idx))
+	merc := w.plainMercator()
 	for _, i := range idx {
 		ft := &w.c.Features[i]
 		ef := EsriFeature{Attrs: w.attrs(ft), HasGeom: w.geometry}
 		if w.geometry && ft.Geom != nil {
-			if e, ok := geom.ToEsri(w.outGeometry(ft.Geom)); ok {
+			if ft.Merc != nil && merc {
+				if e, ok := ft.Merc.Esri(ft.Geom); ok {
+					ef.Geom = e
+				}
+			} else if e, ok := geom.ToEsri(w.outGeometry(ft.Geom)); ok {
 				ef.Geom = &e
 			}
 		}
