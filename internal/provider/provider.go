@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +88,7 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	var d *catalog.Drawing
 	var hrefs []string
 	for _, a := range item.Assets {
-		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil || lodOf(a) >= 0 {
 			hrefs = append(hrefs, a.Href)
 		}
 	}
@@ -184,10 +185,13 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if err != nil {
 		return nil, query.Bad(err.Error())
 	}
-	// Small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
+	// A Map Viewer tile reads the topic's tile-ready level for its zoom where it has one. Other
+	// small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
 	// than the request (an `overview` asset).
 	source := layer
-	if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
+	if lod, lp := pr.tileLevel(ctx, item, p, params, maxRecords); lod != nil {
+		source, p = lod, lp
+	} else if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
 		if source, err = pr.Open(ctx, ov); err != nil {
 			return nil, err
 		}
@@ -230,6 +234,9 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readLimit = pr.MaxGeometryRows
 	}
 	sel := pq.Selection{IDs: p.IDs, Box: p.Box, Page: p.Page}
+	if geom.Mercator[source.EPSG] && p.Box != nil {
+		sel.Box = mercatorBox(p.Box)
+	}
 	if thin {
 		sel.Page = &pq.Page{Offset: p.Page.Offset, Limit: readLimit}
 	}
@@ -445,8 +452,14 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	n := len(rows)
 	sc.shapes, sc.has = slices.Grow(sc.shapes, n)[:n], slices.Grow(sc.has, n)[:n]
 	idCol := slices.Index(p.Columns, "feature_id")
+	// A tile-ready level is already drawn for its zoom, in Web Mercator: its shapes are neither
+	// simplified nor cached, and it is thinned in metres.
+	merc := geom.Mercator[source.EPSG]
+	if merc {
+		thin *= metresPerDegree
+	}
 	var cached *geom.Cached
-	if p.Geometry && p.Tolerance > 0 && idCol >= 0 {
+	if p.Geometry && p.Tolerance > 0 && idCol >= 0 && !merc {
 		cached = pr.Shapes.At(source.ID(), p.Tolerance)
 	}
 	// Where feature_id is the row number + 1, the cached shapes are found before anything is
@@ -465,7 +478,7 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 	if p.Geometry && !byRow {
 		sc.find(cached, rows, known, values, idCol)
 	}
-	if err := pr.fill(ctx, source, p, cached, rows, sc); err != nil {
+	if err := pr.fill(ctx, source, p, cached, rows, sc, merc); err != nil {
 		return nil, nil, err
 	}
 	shapes, has := sc.shapes, sc.has
@@ -498,7 +511,9 @@ func (pr *Provider) features(ctx context.Context, source *pq.Layer, p *plan.Plan
 				}
 			}
 		}
-		k := known != nil && known[i]
+		// A tile-ready level's rows are those whose bbox meets the tile, kept as meeting it: its
+		// shapes are not in lon/lat for the exact test, and drawing the few that miss costs nothing.
+		k := known != nil && known[i] || merc
 		if !k && spatial != nil && g != nil {
 			pass, sure := spatial.Decide(shapes[i].Bound)
 			k = pass && sure
@@ -638,7 +653,7 @@ func (s *scratch) find(cached *geom.Cached, rows []int64, known []bool, values *
 
 // fill reads and simplifies the geometry of the rows find left missing (in parallel), caching
 // the shapes when there is a cache.
-func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, cached *geom.Cached, rows []int64, sc *scratch) error {
+func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, cached *geom.Cached, rows []int64, sc *scratch, merc bool) error {
 	missing := sc.missing
 	if len(missing) == 0 {
 		return nil
@@ -666,9 +681,17 @@ func (pr *Provider) fill(ctx context.Context, source *pq.Layer, p *plan.Plan, ca
 			for k := from; k < to; k++ {
 				i := missing[k]
 				var err error
-				if cached != nil {
+				switch {
+				case cached != nil:
 					shapes[i], has[i], err = cached.Make(ids[i], wkb.Bytes(0, k))
-				} else {
+				case merc:
+					if b := wkb.Bytes(0, k); len(b) > 0 {
+						var g orb.Geometry
+						if g, err = geom.ReadWKB(b); err == nil {
+							shapes[i], has[i] = geom.Shape{G: g, Bound: geom.Bounds(g), Merc: geom.InMercator(g)}, true
+						}
+					}
+				default:
 					shapes[i], has[i], err = geom.FromWKB(wkb.Bytes(0, k), p.Tolerance)
 				}
 				if err != nil {
@@ -756,4 +779,60 @@ func overview(item *catalog.Item, tolerance float64) string {
 		}
 	}
 	return href
+}
+
+// metresPerDegree converts the plan's degrees back to the Web Mercator metres it read them from.
+const metresPerDegree = 111320
+
+// lod0Resolution is the metres a pixel covers at web map zoom 0.
+const lod0Resolution = 156543.03392804097
+
+// lodOf is the zoom of a `tiles_lodNN` asset, -1 for any other.
+func lodOf(a catalog.Asset) int {
+	s, ok := strings.CutPrefix(a.Key, "tiles_lod")
+	if !ok {
+		return -1
+	}
+	if z, err := strconv.Atoi(s); err == nil && z >= 0 {
+		return z
+	}
+	return -1
+}
+
+// tileLevel opens the tile-ready level a Map Viewer tile reads, and plans the request against it:
+// the coarsest level at least as fine as the tile's pixel. It gives nil, so the tile reads as any
+// other request, where the topic has no such level, the level lacks a field the request needs,
+// or the response is not plain Web Mercator.
+func (pr *Provider) tileLevel(ctx context.Context, item *catalog.Item, p *plan.Plan, params query.Raw, maxRecords int64) (*pq.Layer, *plan.Plan) {
+	if params["resultType"] != "tile" || p.Kind != plan.Features || !p.Geometry || len(p.IDs) > 0 || p.Pixel <= 0 ||
+		!geom.Mercator[p.OutSR] || params["geometryPrecision"] != "" || params["f"] != "pbf" && params["f"] != "json" {
+		return nil, nil
+	}
+	want := math.Log2(lod0Resolution/(max(p.Tolerance, p.Pixel)*metresPerDegree)) - 1e-6
+	href, best := "", math.MaxInt
+	for _, a := range item.Assets {
+		if z := lodOf(a); z >= 0 && float64(z) >= want && z < best {
+			href, best = a.Href, z
+		}
+	}
+	if href == "" {
+		return nil, nil
+	}
+	lod, err := pr.Open(ctx, href)
+	if err != nil || !geom.Mercator[lod.EPSG] || slices.ContainsFunc(p.Columns, func(c string) bool { return !lod.Has(c) }) {
+		return nil, nil
+	}
+	lp, err := plan.New(params, plan.Layer{Columns: lod.Columns, Point: lod.Point, BBox: lod.HasBBox}, maxRecords)
+	if err != nil {
+		return nil, nil
+	}
+	return lod, lp
+}
+
+// mercatorBox is a lon/lat box in Web Mercator.
+func mercatorBox(b *[4]float64) *[4]float64 {
+	var m [4]float64
+	m[0], m[1] = geom.ExtentToMercator(b[0], b[1])
+	m[2], m[3] = geom.ExtentToMercator(b[2], b[3])
+	return &m
 }

@@ -53,7 +53,9 @@ func pagesFor(firsts []int64, rel []int64) []int {
 // touch. Other columns are read by page where the offset index places their pages and only some
 // are wanted, else whole, decoding a dictionary once.
 func (l *Layer) want(ctx context.Context, lf leaf, g int, rel []int64) ([]int, *layout, error) {
-	if lf.kind != KindBytes && (rel == nil || !lf.flat || l.chunkMeta(lf, g).OffsetIndexOffset == 0) {
+	noIndex := l.chunkMeta(lf, g).OffsetIndexOffset == 0
+	if lf.kind != KindBytes && (rel == nil || !lf.flat || noIndex) || !lf.flat && noIndex {
+		// Only a page index tells which rows a nested column's pages hold.
 		return nil, nil, nil
 	}
 	lay, err := l.layout(ctx, lf, g)
@@ -82,7 +84,7 @@ func (l *Layer) runs(ctx context.Context, lf leaf, g int, rel []int64) ([]run, e
 	if err != nil {
 		return nil, err
 	}
-	if pages == nil && lf.kind != KindBytes {
+	if pages == nil {
 		got, err := l.decodeOnce(ctx, ck, []int{-1}, func() (map[int]*Values, error) {
 			v, err := l.decodeChunk(ctx, lf, g)
 			return map[int]*Values{-1: v}, err
@@ -289,7 +291,7 @@ func (l *Layer) prefetch(ctx context.Context, leaves []leaf, spans []rgSpan) err
 			if err != nil {
 				return err
 			}
-			if pages == nil && lf.kind != KindBytes {
+			if pages == nil {
 				start, end := l.chunkRange(lf, sp.g)
 				add([2]int64{start, end})
 				continue
@@ -437,7 +439,9 @@ func readValues(page parquet.Page, lf leaf, b *builder) error {
 	for {
 		n, err := vr.ReadValues(buf)
 		for _, v := range buf[:n] {
-			if v.IsNull() {
+			if lf.coord {
+				b.entry(v, lf.maxDef)
+			} else if v.IsNull() {
 				b.null()
 			} else {
 				lf.conv(b, v)

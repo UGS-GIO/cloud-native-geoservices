@@ -122,14 +122,10 @@ func (l *Layer) spans(rows []int64) ([]rgSpan, error) {
 	return spans, nil
 }
 
-// Read returns the values of cols at the sorted row numbers rows, decoding each run once.
+// Read returns the values of cols at the sorted row numbers rows, decoding each run once. A
+// native geometry comes back as WKB.
 func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, error) {
-	out := &Rows{Cols: cols, Cells: make([][]Cell, len(cols))}
-	spans, err := l.spans(rows)
-	if err != nil || len(rows) == 0 {
-		return out, err
-	}
-	leaves := make([]leaf, len(cols))
+	leaves := make([]leaf, len(cols), len(cols)+1)
 	for c, name := range cols {
 		lf, ok := l.leaves[name]
 		if !ok {
@@ -137,12 +133,70 @@ func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, e
 		}
 		leaves[c] = lf
 	}
+	g := -1
+	if l.ys != nil {
+		if g = slices.Index(cols, l.Geom); g >= 0 {
+			leaves = append(leaves, *l.ys)
+		}
+	}
+	cells, err := l.read(ctx, leaves, rows)
+	if err != nil {
+		return nil, err
+	}
+	if g >= 0 {
+		cells[g] = l.joinCoords(cells[g], cells[len(cols)])
+	}
+	return &Rows{Cols: cols, Cells: cells[:len(cols)]}, nil
+}
+
+// joinCoords is the WKB of each row whose x and y entries are xs and ys.
+func (l *Layer) joinCoords(xs, ys []Cell) []Cell {
+	b := newBuilder(KindBytes, len(xs), 0)
+	var n nest
+	depth := depths[l.wkb]
+	for i := range xs {
+		n.assemble(xs[i].V.Bytes(xs[i].I), ys[i].V.Bytes(ys[i].I), depth)
+		if len(n.xs) == 0 {
+			b.null()
+			continue
+		}
+		b.v.Valid = append(b.v.Valid, true)
+		b.v.Data = n.appendWKB(b.v.Data, l.wkb)
+		b.v.Offs = append(b.v.Offs, uint32(len(b.v.Data)))
+	}
+	v := b.done()
+	out := make([]Cell, len(xs))
+	for i := range out {
+		out[i] = Cell{v, i}
+	}
+	return out
+}
+
+// geomLeaves are the leaves reading the geometry takes: two for a native one.
+func (l *Layer) geomLeaves() []leaf {
+	lf, ok := l.leaves[l.Geom]
+	switch {
+	case !ok:
+		return nil
+	case l.ys != nil:
+		return []leaf{lf, *l.ys}
+	}
+	return []leaf{lf}
+}
+
+// read returns the cells of leaves at the sorted rows: [leaf][row].
+func (l *Layer) read(ctx context.Context, leaves []leaf, rows []int64) ([][]Cell, error) {
+	out := make([][]Cell, len(leaves))
+	spans, err := l.spans(rows)
+	if err != nil || len(rows) == 0 {
+		return out, err
+	}
 
 	if err := l.prefetch(ctx, leaves, spans); err != nil {
 		return nil, err
 	}
 	// Every (column, row group) in parallel: cached runs, or fetch and decode.
-	runs := make([][][]run, len(cols))
+	runs := make([][][]run, len(leaves))
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(32)
 	for c, lf := range leaves {
@@ -158,7 +212,7 @@ func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, e
 		return nil, err
 	}
 
-	for c := range cols {
+	for c := range leaves {
 		cells := make([]Cell, len(rows))
 		for s, sp := range spans {
 			rs := runs[c][s]
@@ -172,7 +226,7 @@ func (l *Layer) Read(ctx context.Context, cols []string, rows []int64) (*Rows, e
 				cells[i] = Cell{rs[k].v, int(rel - rs[k].first)}
 			}
 		}
-		out.Cells[c] = cells
+		out[c] = cells
 	}
 	return out, nil
 }

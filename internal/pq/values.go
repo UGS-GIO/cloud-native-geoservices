@@ -105,6 +105,7 @@ func (v *Values) Size() int64 {
 type builder struct {
 	v       Values
 	anyNull bool
+	open    bool // a coordinate leaf's row is being filled
 }
 
 // newBuilder starts n values; dataHint sizes the byte buffer of a text or binary column.
@@ -162,6 +163,7 @@ func (b *builder) bytes(x []byte) {
 }
 
 func (b *builder) done() *Values {
+	b.endRow()
 	b.v.N = len(b.v.Valid)
 	if !b.anyNull {
 		b.v.Valid = nil
