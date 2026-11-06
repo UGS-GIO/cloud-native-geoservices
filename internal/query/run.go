@@ -549,10 +549,17 @@ func (w *winnow) esriFeatures(idx []int) ([]EsriFeature, bool) {
 	idx = w.sorted(idx)
 	out := make([]EsriFeature, 0, len(idx))
 	merc := w.plainMercator()
+	var ready []geom.Esri // one allocation for the features' Ready geometries
 	for _, i := range idx {
 		ft := &w.c.Features[i]
 		ef := EsriFeature{Attrs: w.attrs(ft), HasGeom: w.geometry}
-		if w.geometry && ft.Geom != nil {
+		if w.geometry && ft.Ready != nil {
+			if ready == nil {
+				ready = make([]geom.Esri, 0, len(idx))
+			}
+			ready = append(ready, geom.Esri{Kind: ft.Ready.Kind(), Ready: ft.Ready})
+			ef.Geom = &ready[len(ready)-1]
+		} else if w.geometry && ft.Geom != nil {
 			if ft.Merc != nil && merc {
 				if e, ok := ft.Merc.Esri(ft.Geom); ok {
 					ef.Geom = e

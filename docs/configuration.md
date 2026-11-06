@@ -36,6 +36,7 @@ container memory limit. See [Memory sizing](performance.md#memory-sizing).
 | `PAGE_CACHE_MB` | 128, or 3% of memory | Bytes fetched from data files |
 | `DECODED_CACHE_MB` | 512, or 10% | Decoded column values, by file, column and row group or page |
 | `SHAPE_CACHE_MB` | 512, or 15% | Simplified geometry, by file and zoom step |
+| `READY_CACHE_MB` | 256, or 8% | Tile-ready levels' rows, encoded as tiles write them |
 | `RESPONSE_CACHE_MB` | 256, or 6.25% | Encoded responses, kept compressed, by ETag |
 
 ## Request limits

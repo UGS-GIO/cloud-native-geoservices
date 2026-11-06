@@ -77,6 +77,7 @@ asset is a layer. Items without a `data` asset are skipped. The server reads the
 | `properties["ugs:renders"]` | Named [renders](#renders): `{"<name>": {"title": "…", "esri_url": "…"}}` |
 | `assets.data.href` | The GeoParquet file |
 | `assets.overview*.href` and `ugs:simplify_tolerance` | [Overviews](#overviews) |
+| `assets.tiles_lodNN.href` | [Tile-ready levels](#tile-ready-levels) |
 
 The `ugs:` field names come from the project's first deployment and are fixed in the current
 release.
@@ -136,6 +137,20 @@ The layer description lists the overviews in `multiScaleGeometryInfo`, as ArcGIS
 a layer with optimized drawing. Each level is the web map zoom level at which the overview's
 tolerance is about one pixel, `round(log2(1.40625 / tolerance))`, so tolerances of 0.00068,
 0.0027 and 0.0108 degrees give `{"levels": [7, 9, 11]}`.
+
+## Tile-ready levels
+
+An asset whose key is `tiles_lod` and a zoom, such as `tiles_lod09`, is that zoom's tile-ready
+level: GeoParquet 1.1 in EPSG:3857 with native GeoArrow geometry (`multipolygon` or
+`multilinestring`, x and y separated) and a bbox covering, each point on the zoom's pixel grid
+(156543.03392804097 / 2^zoom metres). The warehouse writes one per zoom from 5 to 14, keeping
+`feature_id` and the fields the topic's styles draw by.
+
+A Map Viewer tile query (`resultType=tile`, Web Mercator output with a quantization tolerance,
+`f=pbf` or `json`) reads the coarsest level at least as fine as the tolerance, and reads the
+layer as above when there is none, or when the level lacks a field the query asks for. The
+tile then has every feature whose covering meets it. See
+[Performance](performance.md#tile-ready-levels).
 
 ## Data requirements
 

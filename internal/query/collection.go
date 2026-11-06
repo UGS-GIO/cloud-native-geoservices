@@ -19,6 +19,9 @@ type Feature struct {
 	Known bool // the provider found from its bbox that it meets the geometry filter
 	// Merc, when set, holds Geom in Web Mercator, shared across requests (a cached shape).
 	Merc *geom.Projected
+	// Ready, when set, is the geometry already on a quantization grid, in Web Mercator; Geom is
+	// then only its bounds.
+	Ready geom.Ready
 }
 
 // Collection is what the provider hands a query.

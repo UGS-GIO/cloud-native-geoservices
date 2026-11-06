@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,8 @@ type Provider struct {
 	Catalog *catalog.Catalog
 	Reader  *pq.Reader
 	Shapes  *geom.Shapes
+	// Ready holds tile-ready levels' rows as tiles write them; without it, tiles read no level.
+	Ready *ReadyCache
 	// MaxRecords is a page, like ArcGIS Server's maxRecordCount (2000).
 	MaxRecords int64
 	// TileMaxRecords: Map Viewer splits a tile whose response exceeds its limit into four and asks
@@ -87,7 +90,7 @@ func (pr *Provider) Version(ctx context.Context, topicID, render string) (string
 	var d *catalog.Drawing
 	var hrefs []string
 	for _, a := range item.Assets {
-		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil {
+		if strings.HasPrefix(a.Key, "overview") && a.Tolerance != nil || lodOf(a) >= 0 {
 			hrefs = append(hrefs, a.Href)
 		}
 	}
@@ -184,10 +187,13 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 	if err != nil {
 		return nil, query.Bad(err.Error())
 	}
-	// Small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
+	// A Map Viewer tile reads the topic's tile-ready level for its zoom where it has one. Other
+	// small-scale requests on a heavy layer read its coarsest generalized copy that is still finer
 	// than the request (an `overview` asset).
-	source := layer
-	if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
+	source, scale := layer, 0.0
+	if lod, lp, s := pr.tileLevel(ctx, item, p, params, maxRecords); lod != nil {
+		source, p, scale = lod, lp, s
+	} else if ov := overview(item, max(p.Tolerance, p.Pixel)); ov != "" && p.Kind == plan.Features && p.Geometry && len(p.IDs) == 0 {
 		if source, err = pr.Open(ctx, ov); err != nil {
 			return nil, err
 		}
@@ -230,6 +236,9 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readLimit = pr.MaxGeometryRows
 	}
 	sel := pq.Selection{IDs: p.IDs, Box: p.Box, Page: p.Page}
+	if geom.Mercator[source.EPSG] && p.Box != nil {
+		sel.Box = mercatorBox(p.Box)
+	}
 	if thin {
 		sel.Page = &pq.Page{Offset: p.Page.Offset, Limit: readLimit}
 	}
@@ -254,7 +263,13 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 		readRows = rows[:limit+1]
 	}
 	spatial, _ := params.Spatial() // Run reports a bad one
-	feats, values, err := pr.features(ctx, source, p, readRows, draw, nil, spatial)
+	var feats []shaped
+	var values *pq.Rows
+	if scale > 0 {
+		feats, values, err = pr.readyFeatures(ctx, source, scale, p, readRows, draw)
+	} else {
+		feats, values, err = pr.features(ctx, source, p, readRows, draw, nil, spatial)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -271,10 +286,15 @@ func (pr *Provider) load(ctx context.Context, item *catalog.Item, topicID, rende
 				feats[i].size = spread(feats[i].bound)
 			}
 		}
-		// A stable sort by size, as indexes: the features are too large to move around.
-		slices.SortFunc(order, func(a, b int) int {
-			return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
-		})
+		if scale > 0 {
+			// A tile-ready level keeps its rows' order: only which features are left matters.
+			order = largest(feats, order, int(limit))
+		} else {
+			// A stable sort by size, as indexes: the features are too large to move around.
+			slices.SortFunc(order, func(a, b int) int {
+				return cmp.Or(cmp.Compare(feats[b].size, feats[a].size), cmp.Compare(a, b))
+			})
+		}
 	}
 	c.Exceeded = !tile && (int64(len(feats)) > limit || thin && int64(len(rows)) > readLimit)
 	if int64(len(order)) > limit {
@@ -756,4 +776,60 @@ func overview(item *catalog.Item, tolerance float64) string {
 		}
 	}
 	return href
+}
+
+// metresPerDegree converts the plan's degrees back to the Web Mercator metres it read them from.
+const metresPerDegree = 111320
+
+// lod0Resolution is the metres a pixel covers at web map zoom 0.
+const lod0Resolution = 156543.03392804097
+
+// lodOf is the zoom of a `tiles_lodNN` asset, -1 for any other.
+func lodOf(a catalog.Asset) int {
+	s, ok := strings.CutPrefix(a.Key, "tiles_lod")
+	if !ok {
+		return -1
+	}
+	if z, err := strconv.Atoi(s); err == nil && z >= 0 {
+		return z
+	}
+	return -1
+}
+
+// tileLevel opens the tile-ready level a Map Viewer tile reads, plans the request against it and
+// gives the level's pixel: the coarsest level at least as fine as the tile's pixel. It gives nil,
+// so the tile reads as any other request, where the topic has no such level, the level lacks a
+// field the request needs, or the response is not plain Web Mercator.
+func (pr *Provider) tileLevel(ctx context.Context, item *catalog.Item, p *plan.Plan, params query.Raw, maxRecords int64) (*pq.Layer, *plan.Plan, float64) {
+	if pr.Ready == nil || params["resultType"] != "tile" || p.Kind != plan.Features || !p.Geometry || len(p.IDs) > 0 || p.Pixel <= 0 ||
+		!geom.Mercator[p.OutSR] || params["geometryPrecision"] != "" || params["f"] != "pbf" && params["f"] != "json" {
+		return nil, nil, 0
+	}
+	want := math.Log2(lod0Resolution/(max(p.Tolerance, p.Pixel)*metresPerDegree)) - 1e-6
+	href, best := "", math.MaxInt
+	for _, a := range item.Assets {
+		if z := lodOf(a); z >= 0 && float64(z) >= want && z < best {
+			href, best = a.Href, z
+		}
+	}
+	if href == "" {
+		return nil, nil, 0
+	}
+	lod, err := pr.Open(ctx, href)
+	if err != nil || !geom.Mercator[lod.EPSG] || lod.Point || slices.ContainsFunc(p.Columns, func(c string) bool { return !lod.Has(c) }) {
+		return nil, nil, 0
+	}
+	lp, err := plan.New(params, plan.Layer{Columns: lod.Columns, Point: lod.Point, BBox: lod.HasBBox}, maxRecords)
+	if err != nil {
+		return nil, nil, 0
+	}
+	return lod, lp, lod0Resolution / math.Exp2(float64(best))
+}
+
+// mercatorBox is a lon/lat box in Web Mercator.
+func mercatorBox(b *[4]float64) *[4]float64 {
+	var m [4]float64
+	m[0], m[1] = geom.ExtentToMercator(b[0], b[1])
+	m[2], m[3] = geom.ExtentToMercator(b[2], b[3])
+	return &m
 }

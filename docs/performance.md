@@ -63,6 +63,21 @@ At small scales, clients send `maxAllowableOffset`. The server uses it in two wa
   step (the power of two at or below the tolerance), so all tiles of one zoom level share it and
   each feature is simplified once per zoom.
 
+### Tile-ready levels
+
+A topic can also list `tiles_lodNN` assets: one GeoParquet file per web map zoom, already
+simplified, in Web Mercator, every point on that zoom's pixel grid, with native GeoArrow
+geometry. A Map Viewer tile (`resultType=tile` in Web Mercator) reads the coarsest level at least
+as fine as its pixel, when the level has every field the request asks for. Nothing is simplified
+or projected per request. Each row is quantized once at the level's pixel and kept in the ready
+cache as the bytes the pbf format writes. Each tile then copies them, shifting only each part's
+first point. The cache holds a byte array per 64 rows, not an object per shape, so the garbage
+collector has little to scan.
+
+On the wetlands (non-riverine) layer, with tiles this server had not answered before, the levels
+answered about 770 tiles a second against 470 from the overviews, in half the memory (2.4 GB
+against 5.2 GB).
+
 ## Caches
 
 | Cache | Variable | Keyed by |
@@ -70,6 +85,7 @@ At small scales, clients send `maxAllowableOffset`. The server uses it in two wa
 | Page cache | `PAGE_CACHE_MB` | File version and byte range |
 | Decoded values | `DECODED_CACHE_MB` | File version, column, row group or page |
 | Shape cache | `SHAPE_CACHE_MB` | File version, zoom step, `feature_id` |
+| Ready cache | `READY_CACHE_MB` | Tile-ready level version, 64 rows |
 | Response cache | `RESPONSE_CACHE_MB` | ETag |
 
 All caches drop the least recently used entries first. The layer list, the open file footers and
@@ -146,6 +162,7 @@ and the geometry budget default to the smaller of a fixed size and a fraction of
 | `PAGE_CACHE_MB` | 128 MiB | 3% |
 | `DECODED_CACHE_MB` | 512 MiB | 10% |
 | `SHAPE_CACHE_MB` | 512 MiB | 15% |
+| `READY_CACHE_MB` | 256 MiB | 8% |
 | `RESPONSE_CACHE_MB` | 256 MiB | 6.25% |
 | `GEOMETRY_BUDGET_MB` | 512 MiB | 12.5% |
 | `MAX_IN_FLIGHT` | 2048 | 1 per MiB |

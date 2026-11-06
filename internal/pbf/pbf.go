@@ -261,6 +261,14 @@ func (s *scratch) release() {
 }
 
 func (s *scratch) geometry(b []byte, g *geom.Esri, t *geom.Transform) ([]byte, bool) {
+	if g.Ready != nil {
+		// Map Viewer's tiling scheme rounds the zoom 0 pixel off ours in the eleventh digit.
+		if kx, ky, ok := aligned(t); ok && sameScale(t.XScale, g.Ready.Scale()) && sameScale(t.YScale, g.Ready.Scale()) {
+			return g.Ready.AppendPBF(b, kx, ky), true
+		}
+		e := g.Ready.Esri()
+		g = &e
+	}
 	if g.Memo != nil && (g.Kind == geom.EsriPolyline || g.Kind == geom.EsriPolygon) {
 		if kx, ky, ok := aligned(t); ok {
 			if st := s.stepsOf(g, t); st != nil {
@@ -373,3 +381,6 @@ func (st *steps) append(b []byte, kx, ky int64) []byte {
 	}
 	return b
 }
+
+// sameScale reports scales close enough that a point on one's grid lands on the other's.
+func sameScale(a, b float64) bool { return math.Abs(a-b) <= 1e-9*b }

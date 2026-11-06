@@ -385,7 +385,9 @@ func (l *Layer) bboxLeaves() []leaf {
 func (l *Layer) Warm(ctx context.Context, cols []string, rows []int64) error {
 	var leaves []leaf
 	for _, name := range cols {
-		if lf, ok := l.leaves[name]; ok {
+		if name == l.Geom {
+			leaves = append(leaves, l.geomLeaves()...)
+		} else if lf, ok := l.leaves[name]; ok {
 			leaves = append(leaves, lf)
 		}
 	}

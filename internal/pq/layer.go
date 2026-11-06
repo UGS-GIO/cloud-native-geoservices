@@ -51,6 +51,8 @@ type leaf struct {
 	conv  func(b *builder, v parquet.Value)
 	// unsigned integers, whose statistics number reads as signed
 	unsigned bool
+	coord    bool // a native geometry's x or y, decoded a row at a time (geoarrow.go)
+	maxDef   int  // a coord's definition level when it holds a coordinate
 }
 
 // Layer is one opened data file.
@@ -68,8 +70,12 @@ type Layer struct {
 	Rows         int64
 	IDIsRow      bool // feature_id is row number + 1 everywhere
 	Paged        bool // the geometry column has a page index
-	leaves       map[string]leaf
-	reader       *Reader
+	EPSG         int  // the geometry's CRS when the geo metadata names an EPSG one, else 0 (lon/lat)
+	// A native GeoArrow geometry: Read joins its x (leaves[Geom]) and y leaves into WKB of type wkb.
+	ys     *leaf
+	wkb    uint32
+	leaves map[string]leaf
+	reader *Reader
 
 	mu      sync.Mutex
 	indexes map[[2]int]*format.ColumnIndex // column indexes read so far, by row group and leaf
@@ -102,7 +108,9 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 	var geo struct {
 		Primary string `json:"primary_column"`
 		Columns map[string]struct {
-			Types    []string `json:"geometry_types"`
+			Encoding string          `json:"encoding"`
+			CRS      json.RawMessage `json:"crs"`
+			Types    []string        `json:"geometry_types"`
 			Covering struct {
 				BBox map[string][]string `json:"bbox"`
 			} `json:"covering"`
@@ -146,7 +154,7 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		if name := "bbox_" + k; c != nil && c.Leaf() && slices.Contains(BBox, name) {
 			el := elements[c.Index()]
 			kind, conv := converter(el, false)
-			nested[name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+			nested[name] = leaf{index: c.Index(), kind: kind, flat: c.MaxRepetitionLevel() == 0, conv: conv, unsigned: unsigned(el)}
 			covers[c.Index()] = true
 		}
 	}
@@ -156,13 +164,21 @@ func (r *Reader) Open(ctx context.Context, url string) (*Layer, error) {
 		}
 		el := elements[c.Index()]
 		kind, conv := converter(el, el.Name == l.Geom)
-		l.leaves[el.Name] = leaf{c.Index(), kind, c.MaxRepetitionLevel() == 0, conv, unsigned(el)}
+		l.leaves[el.Name] = leaf{index: c.Index(), kind: kind, flat: c.MaxRepetitionLevel() == 0, conv: conv, unsigned: unsigned(el)}
 		if el.Name != l.Geom && !internal[el.Name] {
 			l.Columns = append(l.Columns, Column{el.Name, fieldType(el)})
 		}
 	}
 	if len(nested) == len(BBox) {
 		maps.Copy(l.leaves, nested)
+	}
+	gc := geo.Columns[l.Geom]
+	l.EPSG = crsCode(gc.CRS)
+	if code, ok := wkbCodes[gc.Encoding]; ok {
+		if x, y := coordLeaves(pf, l.Geom); x != nil {
+			ys := coordLeaf(y)
+			l.leaves[l.Geom], l.ys, l.wkb = coordLeaf(x), &ys, code
+		}
 	}
 	l.HasBBox = !slices.ContainsFunc(BBox, func(n string) bool { return !l.Has(n) })
 
@@ -425,12 +441,16 @@ func decimalBytes(b []byte) float64 {
 // GeomBytes estimates the compressed geometry bytes reading the sorted rows fetches and decodes:
 // the pages holding them where the chunk's page layout is known, else the whole chunk.
 func (l *Layer) GeomBytes(rows []int64) int64 {
-	lf, ok := l.leaves[l.Geom]
-	if !ok {
-		return 0
-	}
 	var n int64
 	spans, _ := l.spans(rows)
+	for _, lf := range l.geomLeaves() {
+		n += l.leafBytes(lf, spans)
+	}
+	return n
+}
+
+func (l *Layer) leafBytes(lf leaf, spans []rgSpan) int64 {
+	var n int64
 	for _, sp := range spans {
 		lay, known := l.reader.layouts.Get(chunkKey{l.ID(), lf.index, sp.g})
 		if !known {

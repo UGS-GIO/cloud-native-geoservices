@@ -339,3 +339,123 @@ func FromWKB(b []byte, tolerance float64) (Shape, bool, error) {
 	}
 	return s, true, nil
 }
+
+// ReadWKB reads a little-endian 2D WKB geometry as it is, its points in one array: for a level
+// already drawn for its zoom, which needs no simplifying.
+func ReadWKB(b []byte) (orb.Geometry, error) {
+	r := plainWKB{b: b}
+	n := 0
+	if len(b) >= 5 {
+		n = (len(b) - 5) / 16 // at most this many points
+	}
+	r.pts = make([]orb.Point, 0, n)
+	g := r.geometry()
+	if r.err != nil {
+		return nil, r.err
+	}
+	return g, nil
+}
+
+type plainWKB struct {
+	b   []byte
+	off int
+	pts []orb.Point
+	err error
+}
+
+func (r *plainWKB) u32() int {
+	if r.err != nil || r.off+4 > len(r.b) {
+		r.err = fmt.Errorf("truncated WKB")
+		return 0
+	}
+	v := binary.LittleEndian.Uint32(r.b[r.off:])
+	r.off += 4
+	return int(v)
+}
+
+// count reads an element count, failing when the bytes left cannot hold that many elements of
+// at least each bytes, so a corrupt count never sizes an allocation.
+func (r *plainWKB) count(each int) int {
+	n := r.u32()
+	if r.err == nil && n > (len(r.b)-r.off)/each {
+		r.err = fmt.Errorf("truncated WKB")
+		return 0
+	}
+	return n
+}
+
+func (r *plainWKB) header() int {
+	if r.err == nil && (r.off >= len(r.b) || r.b[r.off] != 1) {
+		r.err = fmt.Errorf("not little-endian 2D WKB")
+	}
+	r.off++
+	return r.u32()
+}
+
+func (r *plainWKB) run() []orb.Point {
+	n := r.u32()
+	if r.err != nil || n > (len(r.b)-r.off)/16 {
+		r.err = fmt.Errorf("truncated WKB")
+		return nil
+	}
+	from := len(r.pts)
+	for range n {
+		r.pts = append(r.pts, orb.Point{math.Float64frombits(binary.LittleEndian.Uint64(r.b[r.off:])),
+			math.Float64frombits(binary.LittleEndian.Uint64(r.b[r.off+8:]))})
+		r.off += 16
+	}
+	return r.pts[from:len(r.pts):len(r.pts)]
+}
+
+func (r *plainWKB) polygon() orb.Polygon {
+	p := make(orb.Polygon, r.count(4))
+	for i := range p {
+		p[i] = r.run()
+	}
+	return p
+}
+
+func (r *plainWKB) geometry() orb.Geometry {
+	switch typ := r.header(); typ {
+	case 1:
+		if r.off+16 > len(r.b) {
+			r.err = fmt.Errorf("truncated WKB")
+			return nil
+		}
+		pt := orb.Point{math.Float64frombits(binary.LittleEndian.Uint64(r.b[r.off:])),
+			math.Float64frombits(binary.LittleEndian.Uint64(r.b[r.off+8:]))}
+		r.off += 16
+		return pt
+	case 2:
+		return orb.LineString(r.run())
+	case 3:
+		return r.polygon()
+	case 4:
+		mp := make(orb.MultiPoint, r.count(21))
+		for i := range mp {
+			if pt, ok := r.geometry().(orb.Point); ok {
+				mp[i] = pt
+			}
+		}
+		return mp
+	case 5:
+		ml := make(orb.MultiLineString, r.count(9))
+		for i := range ml {
+			r.header()
+			ml[i] = r.run()
+		}
+		return ml
+	case 6:
+		mp := make(orb.MultiPolygon, r.count(9))
+		for i := range mp {
+			r.header()
+			mp[i] = r.polygon()
+		}
+		return mp
+	default:
+		if r.err == nil {
+			r.err = fmt.Errorf("unsupported WKB geometry type %d", typ)
+		}
+	}
+	return nil
+}

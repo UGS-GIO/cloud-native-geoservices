@@ -24,6 +24,8 @@ type Esri struct {
 	X, Y  float64
 	Parts [][]orb.Point
 	Memo  *Memo // set on a cached copy shared across requests: what encoders derive from it
+	// Ready, when set, holds the geometry instead of Parts (see Ready.Esri).
+	Ready Ready
 }
 
 // ToEsri converts a GeoJSON-shaped geometry as @terraformer/arcgis does: rings closed, outer

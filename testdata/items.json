@@ -2,6 +2,8 @@
  {"id": "qfaults", "properties": {"title": "Faults", "description": "Fixture faults"},
   "assets": {"data": {"href": "testdata/qfaults.parquet"}}},
  {"id": "geolunits", "properties": {"title": "Units"}, "assets": {"data": {"href": "testdata/geolunits.parquet"}}},
+ {"id": "geolunits_tiles", "properties": {"title": "Units"}, "assets": {"data": {"href": "testdata/geolunits.parquet"},
+  "tiles_lod08": {"href": "testdata/geolunits_lod08.parquet"}, "tiles_lod12": {"href": "testdata/geolunits_lod12.parquet"}}},
  {"id": "wells", "properties": {"title": "Wells", "ugs:renders": {"by-purpose": {"title": "By purpose"}, "by-boxtype": {}}},
   "assets": {"data": {"href": "testdata/wells.parquet"}}}
 ]}

@@ -2,6 +2,8 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -208,5 +210,58 @@ func copyFile(t *testing.T, from, to string) {
 	}
 	if err := os.WriteFile(to, b, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// tile is Map Viewer's query for 512-pixel tile x, y at zoom z, with outFields.
+func tile(z, x, y int, outFields string) query.Raw {
+	const r = 20037508.342789244
+	s := 2 * r / math.Exp2(float64(z))
+	ext := fmt.Sprintf(`{"xmin":%v,"ymin":%v,"xmax":%v,"ymax":%v,"spatialReference":{"wkid":102100}}`,
+		-r+float64(x)*s, r-float64(y+1)*s, -r+float64(x+1)*s, r-float64(y)*s)
+	tol := s / 512
+	return query.Raw{"f": "pbf", "geometry": ext, "geometryType": "esriGeometryEnvelope", "inSR": "102100",
+		"outSR": "102100", "spatialRel": "esriSpatialRelIntersects", "where": "1=1", "outFields": outFields,
+		"resultType": "tile", "maxAllowableOffset": fmt.Sprint(tol),
+		"quantizationParameters": fmt.Sprintf(`{"mode":"view","originPosition":"upperLeft","tolerance":%v,"extent":%s}`, tol, ext)}
+}
+
+// A Map Viewer tile reads the topic's tile-ready level for its zoom, drawing the features the
+// archive would; a tile the levels do not serve reads the archive.
+func TestTileLevels(t *testing.T) {
+	pr := fixture(t)
+	pr.Ready = NewReadyCache(16 << 20)
+	pr.TileMaxRecords = 8000
+	for _, c := range []struct {
+		z, x, y int
+		ready   bool
+	}{{11, 377, 795, true}, {7, 23, 49, true}, {5, 5, 12, true}, {13, 1509, 3182, false}} {
+		got := load(t, pr, "geolunits_tiles", tile(c.z, c.x, c.y, "feature_id,unitsymbol"))
+		want := load(t, pr, "geolunits", tile(c.z, c.x, c.y, "feature_id,unitsymbol"))
+		if len(got.Features) == 0 || len(want.Features) == 0 {
+			t.Fatalf("z%d: %d features, the archive %d", c.z, len(got.Features), len(want.Features))
+		}
+		ids := map[any]bool{}
+		for _, f := range want.Features {
+			ids[f.Props[slices.Index(want.Props, "feature_id")]] = true
+		}
+		shared := 0
+		for _, f := range got.Features {
+			if (f.Ready != nil) != c.ready {
+				t.Fatalf("z%d: ready %v, want %v", c.z, f.Ready != nil, c.ready)
+			}
+			if ids[f.Props[slices.Index(got.Props, "feature_id")]] {
+				shared++
+			}
+		}
+		if shared < len(want.Features)*9/10 {
+			t.Errorf("z%d: %d of the archive's %d features", c.z, shared, len(want.Features))
+		}
+	}
+	// A field the level does not keep reads the archive.
+	for _, f := range load(t, pr, "geolunits_tiles", tile(11, 377, 795, "feature_id,unitname")).Features {
+		if f.Ready != nil {
+			t.Fatal("a level without unitname answered for it")
+		}
 	}
 }

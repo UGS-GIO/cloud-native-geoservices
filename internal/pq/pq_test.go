@@ -1,6 +1,7 @@
 package pq
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"math"
@@ -481,5 +482,93 @@ func TestStructCovering(t *testing.T) {
 	}
 	if !slices.ContainsFunc(l.Groups, func(g Group) bool { return !overlaps(g, &b) }) {
 		t.Error("no row group pruned")
+	}
+}
+
+// A native GeoArrow multipolygon column reads as the WKB of each row, whole or a page at a time.
+func TestGeoArrowMultiPolygon(t *testing.T) {
+	type xy struct {
+		X float64 `parquet:"x"`
+		Y float64 `parquet:"y"`
+	}
+	type row struct {
+		ID   int64    `parquet:"feature_id"`
+		Geom [][][]xy `parquet:"geometry,list"`
+	}
+	ring := func(x0, y0, s float64) []xy {
+		return []xy{{x0, y0}, {x0 + s, y0}, {x0 + s, y0 + s}, {x0, y0 + s}, {x0, y0}}
+	}
+	rows := make([]row, 2000)
+	for i := range rows {
+		x := float64(i)
+		rows[i].ID = int64(i + 1)
+		switch i % 4 {
+		case 0: // one polygon
+			rows[i].Geom = [][][]xy{{ring(x, 0, 1)}}
+		case 1: // a polygon with a hole, and another
+			rows[i].Geom = [][][]xy{{ring(x, 0, 4), ring(x+1, 1, 1)}, {ring(x, 10, 1)}}
+		case 2: // none
+		case 3: // an empty polygon left out before a real one
+			rows[i].Geom = [][][]xy{{}, {ring(x, 0, 2)}}
+		}
+	}
+	path := filepath.Join(t.TempDir(), "lod.parquet")
+	f, _ := os.Create(path)
+	w := parquet.NewGenericWriter[row](f, parquet.PageBufferSize(1024), parquet.MaxRowsPerRowGroup(700),
+		parquet.KeyValueMetadata("geo", `{"version":"1.1.0","primary_column":"geometry","columns":{"geometry":`+
+			`{"encoding":"multipolygon","geometry_types":["MultiPolygon"],"crs":{"id":{"authority":"EPSG","code":3857}}}}}`))
+	if _, err := w.Write(rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	l, err := NewReader(16<<20, 16<<20, 64<<20).Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.EPSG != 3857 || l.GeometryType != "Polygon" || !l.Has("geometry") || len(l.Columns) != 1 {
+		t.Fatalf("EPSG %d, %s, columns %v", l.EPSG, l.GeometryType, l.Columns)
+	}
+	wkb := func(g [][][]xy) []byte {
+		var polys [][][]xy
+		for _, p := range g {
+			if len(p) > 0 {
+				polys = append(polys, p)
+			}
+		}
+		if len(polys) == 0 {
+			return nil
+		}
+		u32 := func(b []byte, v int) []byte { return binary.LittleEndian.AppendUint32(b, uint32(v)) }
+		b := u32([]byte{1}, 6)
+		b = u32(b, len(polys))
+		for _, p := range polys {
+			b = u32(append(b, 1), 3)
+			b = u32(b, len(p))
+			for _, r := range p {
+				b = u32(b, len(r))
+				for _, c := range r {
+					b = binary.LittleEndian.AppendUint64(b, math.Float64bits(c.X))
+					b = binary.LittleEndian.AppendUint64(b, math.Float64bits(c.Y))
+				}
+			}
+		}
+		return b
+	}
+	for _, sel := range [][]int64{l.AllRows(), {3, 4, 5, 699, 700, 1401, 1999}} {
+		got, err := l.Read(context.Background(), []string{"feature_id", "geometry"}, sel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, r := range sel {
+			if want := wkb(rows[r].Geom); !bytes.Equal(got.Bytes(1, i), want) {
+				t.Fatalf("row %d: got %x, want %x", r, got.Bytes(1, i), want)
+			}
+			if got.Get(0, i) != rows[r].ID {
+				t.Fatalf("row %d: id %v", r, got.Get(0, i))
+			}
+		}
 	}
 }
