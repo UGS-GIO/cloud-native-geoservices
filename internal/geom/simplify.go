@@ -377,7 +377,7 @@ func (r *plainWKB) u32() int {
 // at least each bytes, so a corrupt count never sizes an allocation.
 func (r *plainWKB) count(each int) int {
 	n := r.u32()
-	if r.err == nil && n*each > len(r.b)-r.off {
+	if r.err == nil && n > (len(r.b)-r.off)/each {
 		r.err = fmt.Errorf("truncated WKB")
 		return 0
 	}
@@ -394,7 +394,7 @@ func (r *plainWKB) header() int {
 
 func (r *plainWKB) run() []orb.Point {
 	n := r.u32()
-	if r.err != nil || n < 0 || r.off+16*n > len(r.b) {
+	if r.err != nil || n > (len(r.b)-r.off)/16 {
 		r.err = fmt.Errorf("truncated WKB")
 		return nil
 	}

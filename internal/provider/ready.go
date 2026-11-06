@@ -184,6 +184,12 @@ func (pr *Provider) readyFeatures(ctx context.Context, source *pq.Layer, scale f
 // largest keeps, in order, the indexes of the limit largest features, the earliest of those tied
 // at the smallest size kept.
 func largest(feats []shaped, order []int, limit int) []int {
+	if limit <= 0 {
+		return order[:0]
+	}
+	if limit >= len(feats) {
+		return order
+	}
 	sizes := make([]float64, len(feats))
 	for i := range feats {
 		sizes[i] = feats[i].size
