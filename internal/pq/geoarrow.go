@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"math"
+	"strconv"
 
 	"github.com/parquet-go/parquet-go"
 )
@@ -83,13 +84,7 @@ func crsCode(crs json.RawMessage) int {
 	case float64:
 		return int(code)
 	case string:
-		n := 0
-		for _, r := range code {
-			if r < '0' || r > '9' {
-				return 0
-			}
-			n = n*10 + int(r-'0')
-		}
+		n, _ := strconv.Atoi(code)
 		return n
 	}
 	return 0
@@ -116,6 +111,9 @@ func (n *nest) assemble(xb, yb []byte, depth int) {
 		rep, has := int(xb[i]&^noCoord), xb[i]&noCoord == 0
 		yhas := yb[j]&noCoord == 0
 		i, j = i+1, j+1
+		if has && i+8 > len(xb) || yhas && j+8 > len(yb) {
+			break // entries are written whole; a short one ends the row
+		}
 		var x, y float64
 		if has {
 			x = math.Float64frombits(binary.LittleEndian.Uint64(xb[i:]))

@@ -373,6 +373,17 @@ func (r *plainWKB) u32() int {
 	return int(v)
 }
 
+// count reads an element count, failing when the bytes left cannot hold that many elements of
+// at least each bytes, so a corrupt count never sizes an allocation.
+func (r *plainWKB) count(each int) int {
+	n := r.u32()
+	if r.err == nil && n*each > len(r.b)-r.off {
+		r.err = fmt.Errorf("truncated WKB")
+		return 0
+	}
+	return n
+}
+
 func (r *plainWKB) header() int {
 	if r.err == nil && (r.off >= len(r.b) || r.b[r.off] != 1) {
 		r.err = fmt.Errorf("not little-endian 2D WKB")
@@ -397,7 +408,7 @@ func (r *plainWKB) run() []orb.Point {
 }
 
 func (r *plainWKB) polygon() orb.Polygon {
-	p := make(orb.Polygon, r.u32())
+	p := make(orb.Polygon, r.count(4))
 	for i := range p {
 		p[i] = r.run()
 	}
@@ -420,7 +431,7 @@ func (r *plainWKB) geometry() orb.Geometry {
 	case 3:
 		return r.polygon()
 	case 4:
-		mp := make(orb.MultiPoint, r.u32())
+		mp := make(orb.MultiPoint, r.count(21))
 		for i := range mp {
 			if pt, ok := r.geometry().(orb.Point); ok {
 				mp[i] = pt
@@ -428,14 +439,14 @@ func (r *plainWKB) geometry() orb.Geometry {
 		}
 		return mp
 	case 5:
-		ml := make(orb.MultiLineString, r.u32())
+		ml := make(orb.MultiLineString, r.count(9))
 		for i := range ml {
 			r.header()
 			ml[i] = r.run()
 		}
 		return ml
 	case 6:
-		mp := make(orb.MultiPolygon, r.u32())
+		mp := make(orb.MultiPolygon, r.count(9))
 		for i := range mp {
 			r.header()
 			mp[i] = r.polygon()
